@@ -15,3 +15,7 @@ tools/bin/
 .DS_Store
 Thumbs.db
 node_modules/
+
+# agent 运行日志
+.agent-runs/
+.claude/settings.local.json

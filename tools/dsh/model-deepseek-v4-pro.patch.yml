@@ -1,0 +1,5 @@
+# dsh headless 工人改用 DeepSeek-V4-Pro（T2 中档）。模型 id 来自 @deepseek-ai/dsh-llm-deepseek 的默认目录。
+- id: agent-default-model
+  config:
+    provider: deepseek-official
+    model: deepseek-v4-pro

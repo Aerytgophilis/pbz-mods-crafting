@@ -17,7 +17,7 @@
 - 官方：没有。S-GAME 没发布编辑器、SDK、文档，也没有 Steam 创意工坊。
 - 社区：
   - Nexus Mods 上有约 880 个 PBZ mod，主要框架有：
-    - PBZ 专用 UE4SS（官方原版在 PBZ 上不启动 mod）
+    - UE4SS（早期官方原版在 PBZ 上不启动 mod；PBZ 配置已于 2026-11-12 合并进上游 PR #1484）
     - PBZModLoader（TS/JS，借用游戏自带的 PuerTS；开发者包里带 TS 模板和 SDK）
     - Mod Manager（管理 PAK / Blueprint / UE4SS 三类 mod）
   - 通用 UE 指南：Dmgvol/UE_Modding（FModel 导出等）、Cracko298 的 AES key 提取指南。
