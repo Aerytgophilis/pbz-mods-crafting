@@ -121,7 +121,7 @@ Z:\Mods_crafting\
 | T1 旗舰 | Opus 5.5 | 主会话；或 Agent 工具 `model: "opus"` 做对抗审计、设计类子任务 | 可用 |
 | T1 旗舰（跨厂商） | Gemini 4 Neon | `tools/scripts/gemini-ask.ps1`（agy 无头） | **可用**（2026-11-20 起）：跨厂商审计 / 顾问。每次运行都带 `tools/agy/readonly-settings.json`：只能读工作区，命令、写文件、联网、MCP 和敏感路径（`extracted/_local`、`.git`、本地设置）一律拒绝（2026-11-20 实测）。**禁止使用 `--dangerously-skip-permissions`**。要审的文件可用 `-IncludeFiles` 直接嵌进提示词。只能在用户的真实终端里跑（凭据在用户的系统钥匙串里，Claude 的沙箱 shell 读不到） |
 | T2 中档 | Sonnet 5.5；DeepSeek V4 Pro（dsh `deepseek-v4-pro`） | Agent 工具 `model: "sonnet"`；`dsh-worker.ps1 -Model deepseek-v4-pro` | 可用 |
-| T3 Flash | DeepSeek V4.1 Flash（dsh 别名 `deepseek-flash`）、MiniMax M3.1 Flash；Haiku 5.5 | `tools/scripts/dsh-worker.ps1 -Model deepseek-flash|minimax-flash`；Agent 工具 `model: "haiku"` | 可用（dsh 两个模型均已实测） |
+| T3 Flash | **MiniMax M3.1 Flash（默认）**，失败时自动回退 DeepSeek V4.1 Flash（dsh 别名 `deepseek-flash`）；Haiku 5.5 | `tools/scripts/dsh-worker.ps1`（`-Model auto` 为默认；也可指定 `minimax-flash` / `deepseek-flash`，指定时不回退）；Agent 工具 `model: "haiku"` | 可用（默认和回退都已实测，2026-11-20） |
 
 ### 8.2 什么活给哪一档
 
@@ -134,9 +134,19 @@ Z:\Mods_crafting\
 | 编排、做决定、和用户沟通、最终把关 | T1 主会话 | |
 | 关键节点的第二意见 | T0 advisor | 见 8.4 |
 
+**必须交给 T3 工人的情形**（2026-11-20 审计：第 0、1 步共约 1500 条消息，工人调用次数为 0，体力活全由 Opus 主会话自己做）：
+
+- 为了写一份摘要或清单，要读 5 个以上文件，或者 200 KB 以上的导出 JSON、字节码文本、日志；
+- 在 `extracted/` 里跨文件 grep 并整理成表（资产引用链、字段默认值、类型清单）；
+- 批量转换或格式化（例如批量跑 `kismet2txt.py` 后挑出相关函数）；
+- `loader.log`、测试日志超过约 200 行时的分拣和统计。
+
+做法：会话在任务清单里标出哪些步骤交给工人；不交的话写一行理由（例如“只有 2 个文件”“需要逐行对照字节码做判断”）。主会话对工人结果抽查 1～2 处再采用。
+
 ### 8.3 dsh 无头工人约定
 
 - 一律通过 `tools/scripts/dsh-worker.ps1` 调用：headless profile，**不开任何端口**，任务完成后进程自动退出，超时（默认 30 分钟）强杀进程树，退出码 124。
+- **模型**：默认先用 MiniMax M3.1 Flash；退出码非 0、没有 final 事件或答案为空时，自动用 DeepSeek V4.1 Flash 重跑一次。超时不重跑。stdout 的 `model=` 和运行目录里的 `model.txt` 记录最终给出答案的模型。
 - **默认 `read-only`**：写入会被自动拒绝，不会卡在审批上。需要写文件时显式传 `-PermissionMode workspace-write`，并把 `-Cwd` 指到专门的输出目录，而不是仓库根。理由：工人会读解包出来的、不受信的游戏 JS，不能让它有权限改 `.claude/` 或 `.git/`。
 - 复用 dsh Web 界面已保存的凭据（`tools/dsh/headless-stored-credentials.patch.yml`），脚本不接触密钥；关闭 dsh 遥测。
 - 日志在 `.agent-runs/dsh/<时间戳>-<名字>/`（不提交）。主会话只读 `final.md`，需要时再翻 `events.jsonl`。
