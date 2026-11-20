@@ -7,8 +7,8 @@
 
 ## 背景
 
-两个目标效果：
-1. 普攻铺开的彼岸花像 Boss 阿花战时一样，每隔几秒自动爆炸、爆后不消失，持续削杀气。
+两个目标效果（完整规格见 `mods/hongzhuang-guizhan-plus/README.md`，2026-11-20 修订）：
+1. 场地彼岸花：存在时间不变；期间每 `tickInterval` 秒自动爆炸一次且不消失；到期仍爆炸一次后消失；按 E 主动引爆后花**不消失**，E 有 5 s 冷却；在旧花上铺新花的原版规则不变；花数量上限不变。
 2. F 蓄力（按住重击，Lv25 火照黄泉）的白色彼岸花 1 朵 → 5 朵。
 
 候选路线：A PBZModLoader + JS（运行时改反射对象、PuerTS mixin），B UE4SS Lua，C pak / IoStore 资产替换。
@@ -41,9 +41,12 @@
       - F 蓄力 GA（候选 `GA_Hun_GuiTouBlade_B_Hold*`）及其时间轴上发白花的动作（`CountRange` 等）
       - `DT_WeaponData`，核实武器内部代号
       - JS 树里有没有针对这些类的 TS mixin（`TsMixinObject.js` 等）
+      - **E 主动引爆**：对应的能力 / GE（候选 `GE_Weapon_GuiTouBlade_CanManualExplode`、被动的 `Max Flowers Can Manual Explode`），引爆后是谁让花消失（`Trigger Explode` 内部、`Remove Flowers`、还是 Deactivate），以及有没有现成的冷却机制可以挂 5 s 冷却
+      - **铺花覆盖规则**：新花替换旧花并立即爆炸一次的逻辑在哪，确保常驻和周期爆炸不破坏它
+      - **Boss 阿花的花丛爆炸间隔**：给出具体秒数（资产默认值 + 录像实测），作为 `tickInterval` 的依据
    3. 如果 FModel 看不懂 ubergraph 字节码，再评估 UAssetGUI；不提前装。
 2. **主路线：A（PBZModLoader + JS），B 为同等候选**。选 A 的理由：Alt+F5 热重载；同 build 有多个开源先例；不分发游戏资产。B（UE4SS）同样能改写 BP 函数返回值，在效果 1 上的差距**要实测**；如果 A 的关键调用不可用，转 B。
-3. **效果 1 必须同时处理花的上限**：常驻的花会撞上 `Max Flowers Default`，被 `Remove Flowers` 移除。定时爆用游戏时间，不用真实时间的 `setInterval`。
+3. **效果 1 的实现要点**：花的上限保持原版（规格要求），但要确认周期爆炸不会触发 `Remove Flowers`；把“爆炸”和“消失”拆开（周期爆、E 引爆只爆不消失，到期爆完再消失）；定时用游戏时间，不用真实时间的 `setInterval`；平衡参数（`tickInterval`、`tickDamageScale` 等）做成可配置。
 4. **效果 2**：先试运行时改时间轴 `CountRange`；如果运行时修改无效、而数量是纯资产数据，局部退到 C（C 的 `-UserDir` 方案可以不碰游戏目录）。
 5. **AES key 的来源待定**：AESDumpster 没有许可证、二进制未经审计，网页版要上传 exe，不能用。优先用社区公开且可核对的 key；没有的话，运行 AESDumpster 前单独征得用户同意。
 
