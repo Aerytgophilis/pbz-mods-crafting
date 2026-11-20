@@ -1,0 +1,17 @@
+# 游戏资产与第三方内容：不进仓库
+extracted/
+references/
+backups/
+tools/bin/
+*.pak
+*.utoc
+*.ucas
+*.uasset
+*.uexp
+*.ubulk
+*.usmap
+# 本地杂项
+*.log
+.DS_Store
+Thumbs.db
+node_modules/
