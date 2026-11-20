@@ -5,13 +5,13 @@
 //    so hit counts and damage can be read from loader.log next to other mods' lines.
 // 2. Spawn: on every load (game start or Alt+F5), spawn `spawn.count` enemies of `spawn.class` in front of the player.
 //    `spawn.dummy`: their AI is switched off (they stand still). A dummy below `dummyMinHealth` of its max is removed
-//    (not killed: no death, no loot, nothing for the save) and a new one is put in its place.
+//    (not killed: no death, no loot, nothing for the save); Alt+F5 spawns a new one.
 //    stop() (Alt+F5) removes everything this tool spawned.
 // Spawn route learned from Cringe Blade Zero (Jersyi, MIT): BP_SGameAIFunctionLibrary.SpawnAI, then walking movement mode.
 "use strict";
 
 const MOD = "pbz-testbench";
-const VERSION = "0.1.0";
+const VERSION = "0.1.1";
 const UE = require("ue");
 const puerts = require("puerts");
 const P_AILIB = "/SGameAI/FunctionLibrary/BP_SGameAIFunctionLibrary.BP_SGameAIFunctionLibrary_C";
@@ -97,7 +97,7 @@ function spawnOne(cls, transform) {
     if (!valid(pawn)) { log("SpawnAI returned nothing"); return null; }
     try { pawn.CharacterMovement.SetMovementMode(1, 0); } catch (e) { logOnce("move-err", "SetMovementMode(walking) failed: " + e); } // comes out flying
     if (cfg.spawn.dummy) { try { aiLib().DeactivateAI(pawn, gi); } catch (e) { logOnce("deact-err", "DeactivateAI failed: " + e); } }
-    shared.spawned.push({ pawn, transform });
+    shared.spawned.push({ pawn, transform, born: now() });
     let hp = "?", hpMax = "?";
     try { hp = r1(attr(pawn, "Health")); hpMax = r1(attr(pawn, "Health_Max")); } catch (e) { }
     log(`spawned ${nameOf(pawn)} (${cfg.spawn.dummy ? "dummy, AI off" : "AI on"}), HP ${hp}/${hpMax}`);
@@ -119,6 +119,8 @@ function spawnAll(pawn) {
     }
 }
 
+// A dummy below `dummyMinHealth` is removed (not killed). No automatic replacement: 0.1.0 replaced it at once and fell
+// into a loop (each new dummy read 0 HP on the next poll, ~20 spawns a second). Press Alt+F5 for a new one.
 function guardDummies() {
     if (!cfg.spawn.dummy) return;
     for (const s of shared.spawned) {
@@ -126,9 +128,8 @@ function guardDummies() {
         let hp, max;
         try { hp = attr(s.pawn, "Health"); max = attr(s.pawn, "Health_Max"); } catch (e) { return; }
         if (max > 0 && hp / max < cfg.dummyMinHealth) {
-            log(`dummy ${nameOf(s.pawn)} at ${r1(hp)}/${r1(max)} HP: removed before it can die, replacing it`);
-            try { s.pawn.K2_DestroyActor(); } catch (e) { }
-            try { const cls = UE.Class.Load(cfg.spawn.class); const p = cls && spawnOne(cls, s.transform); if (p) s.replaced = true; } catch (e) { log("respawn threw: " + e); }
+            log(`dummy ${nameOf(s.pawn)} at ${r1(hp)}/${r1(max)} HP, ${r1(now() - s.born)} s after spawn: removed before it can die (Alt+F5 for a new one)`);
+            try { s.pawn.K2_DestroyActor(); } catch (e) { log("destroy threw: " + e); }
         }
     }
     shared.spawned = shared.spawned.filter((s) => valid(s.pawn));
@@ -141,8 +142,8 @@ function tick() {
         const pawn = player();
         if (!valid(pawn)) return;
         if (!spawnedThisLoad && cfg.spawn.enabled) { spawnedThisLoad = true; spawnAll(pawn); }
-        guardDummies();
         if (cfg.measure.enabled) measure(pawn);
+        guardDummies();
         errors = 0;
     } catch (e) {
         log("tick threw: " + (e && e.stack || e));
