@@ -1,0 +1,13 @@
+{
+  "enabled": true,
+  "measure": { "enabled": true, "radius": 3000 },
+  "spawn": {
+    "enabled": true,
+    "class": "/PBZCombatAsset/ActorData/Mobs/003_MaleThug/BP_Monster_MaleThug_Sword_Blue.BP_Monster_MaleThug_Sword_Blue_C",
+    "count": 1,
+    "distance": 500,
+    "spacing": 300,
+    "dummy": true
+  },
+  "dummyMinHealth": 0.25
+}

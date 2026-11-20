@@ -10,3 +10,4 @@
 | 2026-11-20 20:57 | 换加载器入口：用 version.dll 时游戏加载的是 `C:\WINDOWS\SYSTEM32\VERSION.dll`，没生成 `loader.log`，加载器没有运行。按安装说明的 ANOTHER ENTRY 一节，删掉我们放的 `platform\steam\version.dll`，换成 `platform\steam\hid.dll`（2.1.0 的备用入口，sha256 a741d9f8…516c）。脚本 `tools/scripts/switch-loader-entry.ps1 -Entry hid`。没有覆盖游戏文件 | 不需要备份（删掉的是我们自己放的文件） | agent（用户批准） |
 | 2026-11-20 21:03 | 重新部署 0.0.3-verify：自动爆炸默认不震屏、不震手柄（`tickShake=false`）；同一圈花合成一次爆炸（`tickCoalesce=0.4`）；修好读升级标签的日志。按已批准的范围部署 | 不需要备份 | agent |
 | 2026-11-20 21:07 | 重新部署 0.0.3-verify：修好合批（只有某朵花严格到点时才触发，0.4 s 内到点的花一起爆）；每次加载都清空一次性日志 | 不需要备份 | agent |
+| 2026-11-20 21:22 | 新建并部署本地测试工具 `mods\pbz-testbench\` 0.1.0（不发布）：在附近 NPC 掉血或杀气变化时写日志；每次加载在面前刷 1 个不动的木桩小怪（`BP_Monster_MaleThug_Sword_Blue`），血量低于 25% 时移除再补一个，不让它死；Alt+F5 时清掉刷出来的敌人。用户已批准，以后部署这个文件夹不再逐次询问 | 存档另备份到 `backups/2026-11-20/saves-before-testbench/`（27 个文件，已核对） | agent |
