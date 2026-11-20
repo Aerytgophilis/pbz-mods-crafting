@@ -8,7 +8,8 @@
 
 .NOTES
   - 用 headless profile：没有 HTTP/浏览器层，不监听任何端口（见 dsh-headless README）。
-  - 沙箱根目录 = -Cwd（默认仓库根）；权限模式默认 workspace-write，工作区外的写入会被拒绝。
+  - 沙箱根目录 = -Cwd（默认仓库根）；权限模式默认 read-only（写入一律被拒）。需要写文件时传 -PermissionMode workspace-write，并把 -Cwd 指到专门的输出目录。
+  - dsh 安装位置默认 Z:\Tools\deepseek-harness，可用环境变量 DSH_HARNESS_DIR 覆盖。
   - 复用 dsh Web 界面已保存的凭据（tools/dsh/headless-stored-credentials.patch.yml），脚本不接触密钥。
   - 日志写到 .agent-runs/dsh/<时间戳>-<名字>/：task.md、events.jsonl、stderr.log、final.md。
   - 退出码：0 成功；1 dsh 报失败；124 超时被杀。最后一行 stdout 打印 final.md 路径。
@@ -29,7 +30,7 @@ param(
 $ErrorActionPreference = 'Stop'
 $repo = (Resolve-Path (Join-Path $PSScriptRoot '..\..')).Path
 if (-not $Cwd) { $Cwd = $repo }
-$dshHome = 'Z:\Tools\deepseek-harness'
+$dshHome = if ($env:DSH_HARNESS_DIR) { $env:DSH_HARNESS_DIR } else { 'Z:\Tools\deepseek-harness' }
 $dshBin = Join-Path $dshHome 'node_modules\@deepseek-ai\dsh\lib\bin.js'
 $patch = Join-Path $repo 'tools\dsh\headless-stored-credentials.patch.yml'
 

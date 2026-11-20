@@ -1,0 +1,17 @@
+{
+  "permissions": {
+    "allow": [
+      "read_file(.)"
+    ],
+    "deny": [
+      "command(*)",
+      "write_file(*)",
+      "read_url(*)",
+      "execute_url(*)",
+      "mcp(*)",
+      "read_file(extracted/_local)",
+      "read_file(.git)",
+      "read_file(.claude/settings.local.json)"
+    ]
+  }
+}

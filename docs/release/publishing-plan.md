@@ -53,14 +53,10 @@ mods/hongzhuang-guizhan-plus/
 ├─ README.md            规格、安装、配置说明（中文为主）
 ├─ CHANGELOG.md         每个版本改了什么
 ├─ src/                 mod 源码（main.js、配置）
-├─ media/               发布用的成品图（压缩后，每张 < 1 MB）
-│  ├─ thumbnail.jpg     主图 / 缩略图
-│  ├─ banner.jpg        Nexus 页头横幅
-│  └─ screenshot-*.jpg  截图
 └─ release/             说明页文案（Nexus BBCode、B 站简介）
 ```
 
-- **原始素材不进仓库**：录屏、未压缩截图、PSD 等放在仓库外，或者放进一个被 gitignore 的 `media-raw/`。仓库只放压缩后的成品，避免仓库膨胀。
+- **游戏截图和视频都不进 Git 仓库**（Neon 审计意见，已采纳）：截图是 S-GAME 的游戏画面，放进 MIT 仓库容易被误解为一起授权。成品图上传到 Nexus 和 GitHub Release 的附件，原始素材放在仓库外或被 gitignore 的 `media-raw/`。
 - 发布用的 zip 不进仓库，挂在 GitHub Release 上，同时登记 SHA-256。
 
 ### 3.2 发布包结构

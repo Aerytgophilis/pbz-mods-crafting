@@ -31,7 +31,7 @@ if (gameDir.test(cmd)) {
 // 3. 用文件工具写游戏目录或 ADR
 const isFileWrite = /^(Write|Edit|NotebookEdit)$/.test(tool) || /desktop-commander__(write_file|edit_block|move_file|create_directory)$/.test(tool);
 if (isFileWrite && gameDir.test(path)) reasons.push('写入游戏目录');
-if (isFileWrite && /\/docs\/decisions\/\d{4}-[^/]+\.md$/i.test(path)) reasons.push('修改架构决策记录（ADR）');
+if (isFileWrite && /(^|\/)docs\/decisions\/\d{4}-[^/]+\.md$/i.test(path)) reasons.push('修改架构决策记录（ADR）');
 // 用命令改 ADR
 if (/docs[\\/]+decisions[\\/]+\d{4}-[^\s'"]+\.md/i.test(cmd) && /\b(set-content|out-file|add-content|tee|sed\s+-i|mv|cp|move-item|copy-item)\b|>/i.test(cmd)) {
   reasons.push('修改架构决策记录（ADR）');

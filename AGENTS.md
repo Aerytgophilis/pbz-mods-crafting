@@ -119,7 +119,7 @@ Z:\Mods_crafting\
 |---|---|---|---|
 | T0 超旗舰 | Fable 5.2 | Claude Code advisor（`advisorModel: "fable"`，写在不提交的 `.claude/settings.local.json`） | 可用。Pro 计入 usage credits，Max 计入套餐额度 |
 | T1 旗舰 | Opus 5.5 | 主会话；或 Agent 工具 `model: "opus"` 做对抗审计、设计类子任务 | 可用 |
-| T1 旗舰（跨厂商） | Gemini 4 Neon | `tools/scripts/gemini-ask.ps1`（agy 无头） | **暂不可用**：当前账号未通过 Antigravity 资格检查（2026-11-20）。重测通过前不分配任何角色 |
+| T1 旗舰（跨厂商） | Gemini 4 Neon | `tools/scripts/gemini-ask.ps1`（agy 无头） | **可用**（2026-11-20 起）：跨厂商审计 / 顾问。每次运行都带 `tools/agy/readonly-settings.json`：只能读工作区，命令、写文件、联网、MCP 和敏感路径（`extracted/_local`、`.git`、本地设置）一律拒绝（2026-11-20 实测）。**禁止使用 `--dangerously-skip-permissions`**。要审的文件可用 `-IncludeFiles` 直接嵌进提示词。只能在用户的真实终端里跑（凭据在用户的系统钥匙串里，Claude 的沙箱 shell 读不到） |
 | T2 中档 | Sonnet 5.5；DeepSeek V4 Pro（dsh `deepseek-v4-pro`） | Agent 工具 `model: "sonnet"`；`dsh-worker.ps1 -Model deepseek-v4-pro` | 可用 |
 | T3 Flash | DeepSeek V4.1 Flash（dsh 别名 `deepseek-flash`）、MiniMax M3.1 Flash；Haiku 5.5 | `tools/scripts/dsh-worker.ps1 -Model deepseek-flash|minimax-flash`；Agent 工具 `model: "haiku"` | 可用（dsh 两个模型均已实测） |
 
