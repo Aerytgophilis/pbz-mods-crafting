@@ -133,6 +133,8 @@ CDO：`CanUseSpecial=true`、**`SpecialCooldown=0.4`**、**`Max Flowers Default=
 
 玩家花的爆炸 BD **没有直接的杀气伤害项**；杀气削减来自 `Debuff_Tick`（SetByCaller）。“Lv10/20/30 提升爆炸伤害与杀气削减”改的是哪项：【未知】（应在武器升级数据里）。`Weapon_Hun_GuiTouBlade` 只有通用的 `Weapon Attack Multipliers`（物理 1.2、杀气 1.064516），没有这些 SetByCaller 值。【已证实】
 
+**震屏和手柄震动从哪来**（2026-11-20 第 1 步补查，build 26367565）：这个子弹的 ubergraph 先对 `Parent Bullet Transforms` 里每个位置播 `Explosion Particle` 和 `Explosion Sound`。循环结束后，以玩家（`BulletOwnerAvatar`）的位置调**一次** `PlayWorldCameraShake(BD.Explosion Shake, 内半径 1500, 外半径 3000, 0.5)`，再对 0 号玩家控制器调 `K2_ClientPlayForceFeedback(BD.Explosion Force Feedback, BD.Explosion Force Feedback Tag)`。三个字段都在 BD（`PBZ_GuiTouBlade_FlowerExplodeBulletData`）上：小花 BD 是 `ShakeLevel1` / `ForceFeedbackLevel1_PS5` / `Hitreact`。所以**每个爆炸子弹只震一次**，与合批的花数无关；**用一份 Shake 和 ForceFeedback 置空的克隆 BD 就能让自动爆炸不震**，不用 hook 子弹。【已证实（字节码）/ 推断（置空后不震：未实测，UE 对空类的 PlayWorldCameraShake 通常直接返回）】
+
 爆炸子弹 `UpgradeData/PBZ_OverlapBullet_GuiTouBlade_Explosion`：`GetOverlapOrigins` **直接返回 `Parent Bullet Transforms`**；PostStart 时对列表里每个位置播爆炸特效和音效，再对玩家播镜头抖动和手柄震动。**列表为空时推断不会命中任何东西、也没有特效**。因此 `Expire Explode` 的“无被动”后备路径、以及单纯用 `BulletEvent_SubBullet` 生成这种爆炸，都需要另想办法填 `Parent Bullet Transforms`。【已证实（函数）/ 推断（为空时的结果）】
 
 ## 7. Boss 阿花
@@ -167,3 +169,20 @@ CDO：`CanUseSpecial=true`、**`SpecialCooldown=0.4`**、**`Max Flowers Default=
 - UltraFlower 的施加者。
 - JS 树、`DT_WeaponData`、文本表 `X073`。
 - 战斗录像核对（只能由用户在游戏里看）。
+
+## 11. 第 1 步最小验证结果（2026-11-20，build 26367565，PBZModLoader Kintaro 2.1.0，mod 0.0.2-verify）
+
+用户在游戏里实测（武器 ≥ Lv25），并对照了 `ProjectPBZ\PBZModLoader\loader.log`：
+
+| 项 | 结果 | 依据 |
+|---|---|---|
+| 加载器入口 | **`version.dll` 没被加载**：游戏进程用的是 `C:\WINDOWS\SYSTEM32\VERSION.dll`，没生成 `loader.log`。改用备用入口 **`hid.dll`** 后加载器正常起来（`script validation adapters installed`）。`version.dll` 不加载的原因【未知】：本机 Windows 10.0.26300，智能应用控制关闭，进程的 PreferSystem32 关闭，exe 的 DependentLoadFlags 为 0 | 进程模块列表、loader.log |
+| a 周期爆炸、花不消失 | **通过**。从 JS 调 `BD.CreateBullet(Transform(), passive)` → `Initialize(null, avatar, passive, BD, false)` → 给 `Parent Bullet Transforms` 赋 `UE.NewArray(UE.Transform)` → `Start()`，每一步都成功；数组长度与花数一致 | 日志 `tick: N flower(s) exploded in 1 bullet(s), kept`；用户目视确认 |
+| b E 引爆不消失 | **通过**。mixin 覆盖 `Trigger Flowers` 成功（`inherit:false`）；12 朵、25 朵都合成 1 个子弹，花保留，`HasFlower` GE 没被移除 | 日志 `E: 25 flower(s) exploded in 1 bullet(s), kept` |
+| c E 冷却 5 s | **通过**。在覆盖函数里写 `this.SpecialCooldown`，随后的 `WaitDelay` 读到 5 | 用户目视确认，日志 `cooldown 5` |
+| 计时 | 每朵花的寿命取 `K2_GetTimerElapsedTimeHandle(花, 花.Explode Timer)`，可用 | 日志里每朵花约 4 s 一次 |
+| 读升级标签 | `asc.GetOwnedGameplayTags` 在 JS 里**不存在**。0.0.3 改用 `HasMatchingGameplayTag(ConvertStringToGameplayTag(...))`，待验证 | 日志 |
+
+**观察到的问题**：一圈花是在约 0.1～0.4 s 内陆续生成的，所以按每朵花各自的 4 s 计时，一圈会分成 2～4 次连续的小爆炸，每次都震屏一下，用户觉得太频繁。0.0.3 的处理：把计时提前 `tickCoalesce`（0.4 s），让同一圈在同一帧合批；另外自动爆炸时在 `Start()` 前后临时把共享 BD 的 `Explosion Shake` 和 `Explosion Force Feedback` 置空，用完马上还原，所以 E 引爆和到期爆炸仍然震（`tickShake` 默认 false）。【已实现，待实测】
+
+**刚进游戏时鼠标指针浮在外面、转不了视角，点一下窗口后恢复**：只看到一次，跟加载器有没有关系【未知】。可能只是游戏启动时窗口没拿到焦点（UE 常见现象）。如果每次启动都出现、而且只在装了 `hid.dll` 时才有，就换 `winmm.dll` 入口试。

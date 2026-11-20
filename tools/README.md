@@ -10,12 +10,15 @@
 | AESDumpster | 1.2.5 | https://github.com/GHFear/AESDumpster/releases/tag/1.2.5 | 2c0c0de4853eb4988c4739c9714f6960a928b61527b9c98a7badca7291c917bb | tools/bin/AESDumpster-1.2.5/ | 从 PBZ.exe 读 AES key；无许可证；key 只存本地，不进仓库 |
 | PBZ usmap | v1.1 (2026-11-04) | https://github.com/KintaroModding/phantombladezero_pbzusmap/releases/tag/v1.1 | 77a983a7f9df632a3e133487b1eafc2483185f9f98548303386b69dbc9701d78（与官方 SHA256SUMS 一致） | tools/bin/pbzusmap-v1.1/ | `ProjectPBZ-5.7.4-302256-full.usmap`，对应 build 26367565；MIT |
 | Antigravity CLI (agy) | 1.5.13 | https://antigravity.google/docs/install/ | - | %LOCALAPPDATA%\agy\bin | Gemini 无头调用；**目前被地区资格检查拒绝**，见 AGENTS.md §8 |
+| PBZModLoader（Kintaro 分支） | 2.1.0 (2026-11-07) | https://github.com/KintaroModding/phantombladezero_pbzmodloader/releases/tag/v2.1.0 | 50ac906c2687d774757b02c74906da68c23976f683fe9b26873a57afd536c853（win64.zip，与官方一致；解压后各文件与 manifest 一致） | tools/bin/PBZModLoader-2.1.0/ | JS mod 加载器；GPL-3.0；已装进游戏目录，见 docs/install-log.md |
 | REA (rea-agents) | 6.7.0 | npm | - | npx 按需拉取 | 升级手段：只在 grep 追不动 JS 时跑 CLI，见 AGENTS.md §4 |
 
 ## 自己的脚本（`tools/scripts/`）
 
 | 脚本 | 用途 |
 |---|---|
+| `install-loader.ps1` | 把加载器 3 个文件装进游戏目录（只新增，不覆盖；`-Uninstall` 删除）。在用户终端运行 |
+| `deploy-mod.ps1` | 把 `mods/<id>/src/` 同步到游戏的 `PBZModLoader\mods\<id>\`（`-Remove` 删除）。在用户终端运行 |
 | `kismet2txt.py` | 把 FModel 导出的 Blueprint JSON（需开启 “Serialize Script Bytecode”）转成一行一句的伪代码，加上 CDO 默认值。用法：`python -I tools/scripts/kismet2txt.py <export.json> > out.txt` |
 
 FModel 设置（2026-11-20）：游戏目录 `…\PBZ\ProjectPBZ\Content\Paks`、`GAME_UE5_7`、本地 usmap、输出目录 `extracted\fmodel`、开启 Serialize Script Bytecode。AES key 只存在 `extracted/_local/`（gitignored）。

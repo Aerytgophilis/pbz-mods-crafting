@@ -1,0 +1,10 @@
+{
+  "enabled": true,
+  "debugLog": true,
+
+  "tickInterval": 4.0,
+  "tickCoalesce": 0.4,
+  "tickShake": false,
+  "manualCooldown": 5.0,
+  "manualKeepsFlower": true
+}
