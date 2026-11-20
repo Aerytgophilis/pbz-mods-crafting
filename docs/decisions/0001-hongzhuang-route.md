@@ -29,6 +29,22 @@
 - **情况 2**：由 Boss 自己的技能反复触发（`GA_AHua_Skill_05` / `SpawnFlowers` 等）。→ 需要从脚本定时调用爆炸。A 的 `"Trigger Explode"` / `SpawnBullets` 从 JS 调用**零先例**，风险高；要重新比较 A 与 B。
 - **情况 3**：关键逻辑在 native C++ 里、不可 hook。→ 三条路线都要重估。
 
+### 第 0 步结论（2026-11-20，build 26367565）
+
+详见 `docs/game-notes/scarlet-wraithblade-flowers-assets.md`。
+
+- **问题的前提不成立：Boss 的花本身不周期爆炸。** `BP_AHua_Flower_Small/Big` 的 `Get Lifetime` 是常量 3.0，花只有一个不循环的到期 timer，爆一次后消失。被动的 `Process Current Tick Explode` 是“下一帧合批”，不是周期。【已证实】
+- Boss 战里周期性的伤害来自另一种子弹 `BD_AHua_GatheringFlower`（`Skill_06/07`，每 2.0 s 判定一次、持续 8 s、最后一次大爆炸），由原生 BulletData 驱动，与花 Actor 和被动 GA 无关。【已证实（数据）/ 推断（这是玩家记忆中的“周期爆炸”）】
+- 因此归为**情况 2**：原版没有“花常驻并周期爆炸”的机制，mod 要自己定时触发爆炸。不是情况 3：爆炸路径（`BulletDataBase.CreateBullet` → `Initialize` → `Start`，设 `Parent Bullet Transforms`）和被动的各函数都是 Blueprint 可见的 UFunction。
+- 情况 2 触发了本 ADR 的重议条件，所以**状态保持“暂定”**，不在这里宣布 A 定稿。路线现在取决于两件事：
+  1. 能否**替换被动 `Trigger Flowers` 的函数体**（E 引爆只爆不消失；还要避免它移除 `HasFlower` GE，否则被动会走 `Remove Flowers` 把花全部清掉）。
+  2. 能否**从脚本调用 `CreateBullet` → `Initialize` → `Start`**（周期爆炸、额外 4 朵白花都靠它）。
+  - A（PuerTS mixin）和 B（UE4SS）理论上都能做这两件事；A 仍是首选（热重载），但第 1 步的第一件事应是**最小验证**：在 A 里从 JS 让一朵花生成一次爆炸而不消失。不行再按 B 试同样的验证。
+  - C（只改资产）做不到第 1 件，除非改字节码。【推断】周期爆炸有一个纯数据的备选（原生 `BulletEvent_Interval` + `BulletEvent_SubBullet`，Boss GatheringFlower 就是这么做的），但现有爆炸子弹靠 `Parent Bullet Transforms` 定位，要另做爆炸 BD，`LoopCount` 语义也未验证。
+- 好消息：**E 已经有冷却**（被动 `SpecialCooldown = 0.4`），5 秒冷却只需改这一个默认值。
+- **`tickInterval` 建议 4 s**（README 的下限）。花 Actor 没有周期可参考；找到的唯一周期是 GatheringFlower 的 2.0 s，低于下限。**没有看战斗录像**。
+- 规格需要用户确认的点（见笔记第 0、9 节）：原版没有“覆盖旧花”的逻辑，推断用户看到的是超上限淘汰（每次铺 6～14 朵，Lv5 前上限 6、之后 25）；玩家花的爆炸本身不削杀气，杀气主要靠花里的 `Debuff_Tick`，`tickAngerScale` 可能无事可调；5 朵白花会各留一朵大花；白花需要“杀气强化”状态（`Ability.Action.ShaqiReinforced`）。
+
 ## 决定（暂定）
 
 1. **第 0 步（与路线无关）**：**不安装任何 mod 框架**，结论写进 `docs/game-notes/`。
@@ -62,6 +78,7 @@
 
 - Fable advisor：Lifetime 只解释“不消失”，不解释“定时爆”，因此本 ADR 定为暂定，并点名决定性问题。
 - Opus 对抗审计：UE4SS 也能改写 BP 函数返回值（B 不是明显劣势）；花的数量上限与“不消失”冲突；A 草图的热重载和计时 bug；存档备份、反作弊和 Steam 文件校验未调查。详见 `docs/research/routes/D-rebuttal-draft.md` §3.5。
+- 第 0 步（2026-11-20）后咨询 Fable advisor：同意归为情况 2、状态保持暂定；指出 E 引爆的第二条消失路径（`HasFlower` GE 移除 → `Remove Flowers`），要求核对 `CountRange`、`B_Hold_Start` 时间轴和爆炸子弹的 `GetOverlapOrigins`，均已补进笔记。
 
 ## 重议条件
 
