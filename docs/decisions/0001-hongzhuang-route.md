@@ -1,6 +1,6 @@
 # ADR-0001：红妆鬼斩增强 mod 的技术路线
 
-- 状态：**暂定**（待第 0 步核实后转为“已接受”或重议）
+- 状态：**已接受（效果 1）**，2026-11-20 第 1 步游戏内验证后定稿；**效果 2 动手前先做同样的最小验证**，不通过时局部退到 B 或 C。历史：第 0 步前为“暂定”
 - 日期：2026-11-20
 - 依据：`docs/research/routes/` 下 A、B、C 三份辩护，D 主持人反驳；Fable advisor 意见；Opus 对抗审计（见文末）
 - 游戏版本：Steam build 26367565（CL-302256_JKS-17280）
@@ -45,6 +45,31 @@
 - **`tickInterval` 建议 4 s**（README 的下限）。花 Actor 没有周期可参考；找到的唯一周期是 GatheringFlower 的 2.0 s，低于下限。**没有看战斗录像**。
 - 规格需要用户确认的点（见笔记第 0、9 节）：原版没有“覆盖旧花”的逻辑，推断用户看到的是超上限淘汰（每次铺 6～14 朵，Lv5 前上限 6、之后 25）；玩家花的爆炸本身不削杀气，杀气主要靠花里的 `Debuff_Tick`，`tickAngerScale` 可能无事可调；5 朵白花会各留一朵大花；白花需要“杀气强化”状态（`Ability.Action.ShaqiReinforced`）。
 
+### 第 1 步结论（2026-11-20，build 26367565，PBZModLoader Kintaro 2.1.0）
+
+详见 `docs/game-notes/scarlet-wraithblade-flowers-assets.md` §11、§12。用户在游戏里实测，武器 Lv30；结论都与 `loader.log` 核对过。
+
+**已证实**（范围：爆炸用的 Overlap 子弹，和被动 GA 的 `Trigger Flowers`）：
+1. **从 JS 生成爆炸子弹可行**：`BD.CreateBullet(Transform(), passive)` → `Initialize(null, avatar, passive, BD, false)` → `Parent Bullet Transforms = UE.NewArray(UE.Transform)` → `Start()`。花不消失，同一帧到点的花合成 1 个子弹。
+2. **能替换 `Trigger Flowers`**：PuerTS mixin（`inherit:false`）覆盖后，E 引爆只爆不消失，也不移除 `HasFlower` GE；被 E 引爆过的花到期时仍按原版爆一次后消失。
+3. **E 冷却改 5 s**：在覆盖函数里写 `this.SpecialCooldown`，随后的 `WaitDelay` 读到新值；日志里相邻两次 E 正好相隔 5.08 s。
+4. **热重载（Alt+F5）可用**：停止、重新载入，状态正确恢复。
+5. **爆炸真实判伤**：刷进花丛的木桩被自动爆炸打了一下（−293 HP，木桩已破防），一个合批子弹对同一目标只判一次。
+6. **自动爆炸不震屏**：只在 `Start()` 前后临时把共享 BD 的 `Explosion Shake` / `Explosion Force Feedback` 置空，E 引爆和到期爆炸仍保留原版震动。
+
+**未证实**：
+- 追踪白花（效果 2）走同一条路径是否可行。它的 BD 带“从能力取目标”的目标选择器，生成时的目标来源不一样。所以效果 2 实现前先做最小验证：从 JS 额外生成 1 朵白花并让它追踪。
+- 自动爆炸的 40% 伤害和杀气项：伤害系数是在 `Initialize` 时拷进子弹，还是命中时从 BD 读，要先查 `BP_PBZ_OverlapBullet(Data)` 的字节码，再决定是改子弹实例、克隆 BD，还是另加 GE。“置空再还原”只适用于在 `Start()` 里同步读取的字段。
+
+**决定**：
+1. **效果 1 定稿为路线 A**（PBZModLoader Kintaro 2.1.0 + JS），不再试 B。
+2. 效果 2 先做最小验证；不通过时只对效果 2 局部改用 B（UE4SS）或 C（改资产给时间轴加动作）。
+
+**后果（新增）**：
+- **加载器入口**：本机的游戏进程不加载放在 exe 旁的 `version.dll`，加载的是 `C:\WINDOWS\SYSTEM32\VERSION.dll`，原因【未知】。改用备用入口 `hid.dll` 后正常。发布说明要写清“没有生成 `loader.log` 就换入口（hid / winmm / dsound / dxgi）”。注意 Mods Menu 自己占用 `hid.dll`。
+- **成就影响**：仍【未知】。
+- **测试工具**：本地的 `mods/pbz-testbench/`（刷木桩、记伤害），不发布。
+
 ## 决定（暂定）
 
 1. **第 0 步（与路线无关）**：**不安装任何 mod 框架**，结论写进 `docs/game-notes/`。
@@ -75,6 +100,8 @@
 - 加载器是 GPL-3.0；我们的 mod 独立运行时加载，用 MIT 发布。SDK 生成的 `.d.ts` 不提交。
 
 ## 审计记录
+
+- 第 1 步（2026-11-20）定稿前咨询 Fable advisor：要求先补测热重载、爆炸是否判伤、E 引爆过的花到期是否消失（都已补测）；ADR 只把效果 1 定稿为 A，效果 2 另做验证；修正合批逻辑和卸载脚本。
 
 - Fable advisor：Lifetime 只解释“不消失”，不解释“定时爆”，因此本 ADR 定为暂定，并点名决定性问题。
 - Opus 对抗审计：UE4SS 也能改写 BP 函数返回值（B 不是明显劣势）；花的数量上限与“不消失”冲突；A 草图的热重载和计时 bug；存档备份、反作弊和 Steam 文件校验未调查。详见 `docs/research/routes/D-rebuttal-draft.md` §3.5。
