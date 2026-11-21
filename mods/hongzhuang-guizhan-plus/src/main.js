@@ -60,7 +60,8 @@ const K = {
     // Automatic explosions keep the burn's first tick (it lands with the hit) and then remove the burn from the enemies
     // they hit; the hit is scaled so that hit + first tick = tickDamageScale x total:
     //   hit multiplier = (tickDamageScale - firstBurnShare) / hitShare, at least 0.
-    // (Blanking the burn GE on the shared BD instead made broken enemies lose all HP ~0.4 s later: 4 of 4 runs.)
+    // (dev.1/dev.2 blanked the burn GE on the shared BD around Start() instead; dropped because it touches the BD that
+    //  E and expiry explosions share. Its link to the enemy deaths seen then was never established.)
     tickBurn: false,          // true: automatic explosions keep the whole burn and scale only the hit by tickDamageScale
     hitShare: 0.375,          // 149.7 / 399.1
     firstBurnShare: 0.169,    // 67.4 / 399.1

@@ -22,7 +22,7 @@
 |---|---|---|
 | 存在时间 | 3 s / 15 s（Lv5+） | **不变** |
 | 自动周期爆炸 | 无 | Lv5 起每 **4 s** 爆炸一次，**花不消失**；Lv5 前（花只存在 3 s）每 **1.5 s** 爆炸一次，保证到期前至少爆一次 |
-| 自动爆炸的杀气削减 | 花爆炸没有杀气伤害 | **增加杀气伤害**，取 Boss 阿花花爆炸系数的一半：小花 **0.25**、大花 **0.5**；Lv5 前再乘 **0.5** |
+| 自动爆炸的杀气削减 | 花爆炸没有杀气伤害 | **增加杀气伤害**，取 Boss 阿花花爆炸系数的一半：小花 **0.25**、大花 **0.5**；Lv5 前再乘 **0.5**。默认 `tickCantBreak`：杀气只削到 0.1、不破防（见设置一节） |
 | 自动爆炸的血量伤害 | — | 正常爆炸的 **40%**（只对自动爆炸打折；E 引爆、到期爆炸、白花及其留下的大花都保持原版）。**实现（2026-11-21 实测后定）**：原版一次爆炸 = 直击（约 150）+ 爆炸后的灼烧（`GE_Hun_GuiTouBlade_Explode`，67.4 + 91 + 91），合计约 399。自动爆炸只保留灼烧的第一跳（与直击同帧），随后移除灼烧；直击 ×(`tickDamageScale` − 0.169) ÷ 0.375，总量是原版的 `tickDamageScale` 倍（盛放：直击 ×0.616 ≈ 92 + 首跳 67 ≈ 160） |
 | 到期 | 爆炸一次并消失 | **不变** |
 | 按 E 引爆 | 全部爆炸，花消失，冷却 0.4 s | 全部爆炸，**花不消失**，冷却 **5 s** |
@@ -54,7 +54,7 @@
 自动爆炸音量独立于预设（默认 25%）。+200% 面积和 60 s 寿命不进任何预设，只能手动选（README 标“高强度”）。
 
 **玩家可见项**（`config.json` 上半部分）：`enabled`（总开关）、`preset`、`flowerAreaScale`、`flowerLifetime`、`tickVolume`、`lingerEnabled`、`ultraEnabled`。
-**高级项**（`config.json` 下半部分）：`tickInterval`、`tickDamageScale`、`manualCooldown`、`manualKeepsFlower`、`tickShake`、`extraWhiteFlowersLv25/30`、`whiteFlowerTargeting`、`lingerMaxLv15/Lv20`、`lingerSafetyCap`、`ultraAfterTicks`。
+**高级项**（`config.json` 下半部分）：`tickInterval`、`tickDamageScale`、`manualCooldown`、`manualKeepsFlower`、`tickShake`、`extraWhiteFlowersLv25`、`extraWhiteFlowersLv30`、`whiteFlowerTargeting`、`lingerMaxLv15/Lv20`、`lingerSafetyCap`、`ultraAfterTicks`、`tickCantBreak`、`ultraCantBreak`、`areaSpreadRings`、`debugLog`（效果 2 的三项在 v0.1.0 里还不生效）。
 **预设与单项共存**：`preset` 决定基础值，`config.json` 里写了的单项覆盖预设值；加载时在 `loader.log` 打印“盛放 + 自定义 N 项（列出项名）”。
 **写死的常量**（实测后定，不暴露）：`tickCoalesce`、`tickIntervalEarly`、`earlyShachiScale`、`tickShachiSmall/Big`、`ultimateTickFactor`。
 
@@ -65,7 +65,7 @@
 - **`lingerSafetyCap` = 120 s**：每朵花的安全寿命上限，防止敌人卡在地形里让花永远不消失（Lv30 生生不息“无上限”在这个上限之内生效）。设为 0 表示真正无上限。
 
 **设置界面**：v0.1 只用 `config.json`（改完按 Alt+F5 生效）。不做自研游戏内面板，不做游戏外配置工具。v0.2 再评估接入社区 Mods Menu：它更像“配置文件编辑器 + 自带加载器”，用 .txt 配置，占用 `hid.dll`，接入前要实测入口能否共存，成本可能比预想高。
-**待核实**：PBZModLoader 能否解析带注释的 JSON（JSONC）；不能的话，用 `"_说明"` 字段加 README 参数表。
+**已实现**：mod 自己读 `config.json` 并去掉注释（JSONC），不依赖加载器。
 
 **已砍掉**：花数量上限滑块、`extraBigFlowers`（已定全部留大花）、自动爆炸特效强度、白花轨迹样式。**推迟**：Boss 单独倍率（等 Boss 实测）。
 
@@ -85,7 +85,7 @@
 
 **原版平衡说明**：普通小怪站进花丛约 0.3 s 就被打空杀气，这是**原版数值**（第 1 步实测时验证 mod 没有改花丛减益），不削弱。注意本 mod 的花丛面积档位和生生不息都会让敌人在花里待得更久，平衡测试时要一起看。
 
-**等级判断的待办**：已知升级标签只有 `CanManualExplode`（Lv5）、`CanBuff`、`CanCharge`（Lv25）、`Evolution`（推断 Lv30）。Lv15、Lv20 对应什么标签或数据还不知道，生生不息的三级和断情增幅要先导出武器升级表确认。
+**等级判断（已解决，2026-11-21）**：mod 直接读红妆鬼斩的数字等级 `GetWeaponLevel("GuiTouBlade", true)`，Lv5 / Lv15 / Lv20 / Lv30 分档不依赖标签；升级表已导出（Lv5 CanManualExplode、Lv15 CanBuff、Lv25 CanCharge，game-notes §13）。
 
 ### 效果 2：F 蓄力白花
 
@@ -99,8 +99,7 @@
 
 **等级判断的依据**（第 1 步调查，build 26367565）：武器升级会给玩家加 GE，GE 授予标签 `CharacterState.WeaponUpgrade.GuiTouBlade.*`，共 4 个：`CanManualExplode`、`CanBuff`、`CanCharge`、`Evolution`（`UpgradeData/GE_Weapon_GuiTouBlade_*`）。
 - **Lv25 = `CanCharge`**：【已证实】蓄力重击的输入映射 `AIM_GuiTouBlade_HeavyAttack_Hold` 要求这个标签，而火照黄泉就是 Lv25 解锁的蓄力。
-- **Lv30 = `Evolution`**：【推断】依据只有命名（Evolution / 进化，以及 `GA_Weapon_GuiTouBlade_Evolution_FlowerBuff`、`_HitCounter`）。把等级映射到 GE 的武器升级表还没导出。
-- 核实办法：验证 mod 0.0.2 起会在 `loader.log` 写出玩家身上的升级标签，再对照用户报的武器等级。核实之前，Lv30 档不当作已确认。
+- **`Evolution` 不是等级授予的标签，来自铸魂**（升级表已导出，game-notes §13）。彼岸·极要求 Lv30 且带 `Evolution`。【已证实】
 
 > 更正记录（2026-11-20）：最初理解为“5 朵里 3 朵留大花”，用户更正为另外 2 朵也要留，即全部 5 朵都留大花。这正好是原版白花 BD 自带的行为（`BulletEvent_SubBullet(BD_Hun_GuiTouBlade_Flower_Big)`），额外 4 朵用同一个 BD 生成即可，不需要压掉 SubBullet。注意：一次最多多出 5 朵大花，都计入 25 朵上限，超限时最旧的花会被淘汰（原版规则）。
 
@@ -130,7 +129,7 @@
 | 参数 | 默认 | 范围 | 说明 |
 |---|---|---|---|
 | `tickInterval` | 4（花海 3、含苞 6） | 1.5～30 | Lv5 起的自动爆炸间隔（秒，游戏时间） |
-| `tickDamageScale` | 0.4（花海 0.5、含苞 0.25） | 0～1 | 自动爆炸伤害占原版一次爆炸（直击 + 灼烧）的比例 |
+| `tickDamageScale` | 0.4（花海 0.5、含苞 0.25） | 0～1 | 自动爆炸伤害占原版一次爆炸（直击 + 灼烧）的比例。灼烧首跳（约 17%）总会保留，所以低于 0.17 时实际仍约 17% |
 | `manualCooldown` | 5 | 0.4～60 | E 引爆冷却 |
 | `manualKeepsFlower` | true | | false 时回到原版“引爆即消失” |
 | `tickShake` | false | | 自动爆炸是否震屏、震手柄（E 引爆和到期爆炸始终原版） |
@@ -139,11 +138,12 @@
 | `ultraAfterTicks` | 2 | 1～10 | 同一朵花自动爆炸几次后变成“极” |
 | `tickCantBreak` | true | | 自动爆炸的杀气只削到 0.1（用原版花丛减益的“不破防”伤害计算器 `DamageCalculator_CantBreakTarget`）。false 时自动爆炸能把敌人打破防 |
 | `ultraCantBreak` | true | | 彼岸·极（UltraFlower）命中后杀气停在 0.1，和花丛减益一致。false 时用原版计算器 `PBZPlayerNonLethal`：命中后出现破防迹象（杀气从 0.1 回升、随后伤害 ×1.5），但实测没有接着触发自动处决。两种计算器都能把敌人打空血，用时差不多（2026-11-21 对照实测） |
+| `areaSpreadRings` | true | | 面积档位同时把一圈花铺开（×√(1+p)）；Lv5 前的 3 s 花不铺开 |
 | `debugLog` | false | | 在 `loader.log` 写详细日志 |
 
 为什么默认不让花破防（用户 2026-11-21 决定）：自动爆炸的杀气项把**离角色较近**的小怪真正打破防（杀气 0 后），游戏会让角色自己发动红妆鬼斩的简易处决 `GA_SimpleExecution_GuiTouBlade`，角色在没有任何输入的情况下冲出去出刀（game-notes §13 归因日志：250 cm 出现，600 cm 未出现）。原版的花只削到 0.1，不会这样。所以破防这一下留给玩家自己的攻击；想让自动爆炸也能破防，把 `tickCantBreak` 改成 false。铸魂计数溢出（每 5 次命中一次，自动爆炸也计数）仍是原版计算器，也有破防迹象，见 game-notes §13。
 
-效果 2 的 `extraWhiteFlowersLv25/30`、`whiteFlowerTargeting` 在 v0.1.0 里还不生效（写了会在日志里提示忽略）。
+效果 2 的 `extraWhiteFlowersLv25`、`extraWhiteFlowersLv30`、`whiteFlowerTargeting` 在 v0.1.0 里还不生效（写了会在日志里提示忽略）。
 
 **写死的常量**（`main.js` 的 `K`，2026-11-21 实测后定）
 
@@ -167,7 +167,7 @@
 - **寿命档位和生生不息靠暂停花自己的计时器**：`Explode Timer` 和父类的 `Lifetime Timer`（约 30 s，到时静默 `Deactivate`）一起暂停，到期仍走原版路径；停用 mod 时全部恢复。
 - **“花里有敌人”按距离判断**（花的碰撞半径 + 敌人胶囊半径），不用花自己的 `Overlapping Actors`，后者会漏掉仍站在花里的敌人。
 - **前期剩余寿命保护。** 剩余寿命小于约 0.3 s 时不做自动爆炸，避免和到期爆炸重复。
-- **判伤次数要实测。** 一个合批子弹有多个位置都覆盖同一个敌人时，这个敌人吃几次伤害，实测后再定数值。
+- **判伤次数（已实测）**：一个合批子弹即使多个位置都覆盖同一个敌人，这个敌人也只吃一次伤害（game-notes §12）。
 - **还原存档前先关 Steam 云同步。** 否则本地还原的旧档会被云端覆盖。
 
 ## 安装 / 卸载

@@ -222,7 +222,7 @@ CDO：`CanUseSpecial=true`、**`SpecialCooldown=0.4`**、**`Max Flowers Default=
 
 - **`Evolution` 不在等级表里**：铸魂列表（`SnapSoulGEDatas`）为空，但用户这把武器“已铸魂 = true”且带 `Evolution` 标签，所以 `Evolution` = 铸魂。【已证实（等级表）/ 推断（来自铸魂）】
 - 玩家身上 Lv30 时的 SetByCaller（`GetWeaponUpgradeSetByCallerDataMap(被动)`）：`DebuffTickShachi` 0.17、`ExplosionBuffDuration` 3.5、`DebuffBigShachiVulnerability` 0.2、`DebuffMovementMultiplier` 0.8。【已证实】
-- mod 用 `GetCurrentHoldingWeaponLevel` 直接读数字等级，Lv15 / Lv20 / Lv30 分档不依赖标签。断情状态的标签推断为 `CharacterState.AbilityState.GuiTouDao.Buff`（`GE_Hun_GuiTouBlade_HasBuff_Base` 授予，`HasBuff_Ultimate` 需要 `CanBuff`）。【已证实（资产）/ 待游戏内核对】
+- mod 用 `PBZBackPackSubsystem.GetWeaponLevel("GuiTouBlade", true)` 直接读红妆鬼斩本身的数字等级（不是手持武器的等级），Lv15 / Lv20 / Lv30 分档不依赖标签。断情状态的标签推断为 `CharacterState.AbilityState.GuiTouDao.Buff`（`GE_Hun_GuiTouBlade_HasBuff_Base` 授予，`HasBuff_Ultimate` 需要 `CanBuff`）。【已证实（资产）/ 待游戏内核对】
 
 **伤害**（未破防木桩）：
 
@@ -233,9 +233,9 @@ CDO：`CanUseSpecial=true`、**`SpecialCooldown=0.4`**、**`Max Flowers Default=
 | 按子弹改系数：`FindModulesByClass(BulletAttackModule)` → `AddModifier(Physical/Element, Multiply, x)` | ×0.4 → 直击 **59.9**，正好 0.4 | 只改这一颗子弹，共享 BD 不动；E 的子弹系数仍是原版 |
 | 杀气项：`AddModifier(AngerDamage, Add, 0.25)` | 木桩 Shachi **−40** | 设 0 时为 0 |
 | 灼烧不受子弹系数影响 | 两次都是 67.4 / 91 / 91 | |
-| 去掉自动爆炸的灼烧 | 在 `Start()` 前把 BD 的 `PreAttackEvents` 里 `BulletEvent_GameplayEffect.GameplayEffect` 置空，**0.15 s 游戏时间后**再还原：自动爆炸只剩直击，紧接着的 E 仍有灼烧。只在 `Start()` 前后置空无效（命中在 `Start()` 之后才读） | |
+| 去掉自动爆炸的灼烧（dev.1/dev.2 旧方案，dev.3 起改为命中后移除，见本节后文） | 在 `Start()` 前把 BD 的 `PreAttackEvents` 里 `BulletEvent_GameplayEffect.GameplayEffect` 置空，**0.15 s 游戏时间后**再还原：自动爆炸只剩直击，紧接着的 E 仍有灼烧。只在 `Start()` 前后置空无效（命中在 `Start()` 之后才读） | |
 
-所以原版一次爆炸 ≈ 直击 150 + 灼烧 249 ≈ 399，灼烧约占 62.5%。mod 的做法：**自动爆炸不带灼烧，直击 ×(`tickDamageScale` ÷ 0.375)**，盛放 0.4 → 直击约 160，即原版一次爆炸的 40%。【已证实（单一木桩、Lv30）】
+所以原版一次爆炸 ≈ 直击 150 + 灼烧 249 ≈ 399，灼烧约占 62.5%。mod 的做法：**自动爆炸不带灼烧，直击 ×(`tickDamageScale` ÷ 0.375)**，盛放 0.4 → 直击约 160，即原版一次爆炸的 40%。【已证实（单一木桩、Lv30）】 （这是 dev.1/dev.2 的旧公式；dev.3 起保留灼烧首跳，直击 ×(`tickDamageScale` − 0.169) ÷ 0.375，见本节后文。）
 
 **铸魂连击计数（Lv30 `Evolution`）**：被动监听 `GameplayEvent.Hitreact.PostTakeHit.Source`；目标带 `CharacterState.AbilityState.GuiTouBlade.InDebuff`（站在花里）且命中强度匹配 `Hitreact.Strength.Income.{Normal, Break, Knockdown, Knockup, Launchback}` 时，给目标叠一层 `GE_Weapon_GuiTouBlade_Evolution_HitCounter`（上限 5）；溢出时施加 `GE_..._HitCounter_Explode`（物理 / 元素 / 杀气各 2.0，约为花爆炸的 5 倍）。花爆炸的命中强度是 `Normal.Light`，**所以每次自动爆炸都会给花里的敌人加一层计数**，自动爆炸会让铸魂爆发来得更快。【已证实（字节码）/ 推断（自测里木桩 0.5 s 内从满血到 0 就是它）】
 
@@ -259,7 +259,7 @@ CDO：`CanUseSpecial=true`、**`SpecialCooldown=0.4`**、**`Max Flowers Default=
 | 自动爆炸让敌人后仰 | 木桩每次被自动爆炸推出花外（用户在游戏里也观察到）。**保持原样**（用户 2026-11-21：实战中敌人和主角都会动，没关系） | 已证实 |
 | 断情增幅（探针强制断情） | 间隔 4 s → 2 s | 已证实（逻辑）；断情标签名待用户在游戏里核对 |
 | 面积 +80% | 爆炸半径 120 → 161、500 → 670.8；小花碰撞半径 100 → 134.2；一圈 6 朵半径 200 → 268.3 | 已证实 |
-| 花海伤害 0.5 | 直击 −199.7（预期 149.7 × 0.5 ÷ 0.375 = 199.6） | 已证实 |
+| 花海伤害 0.5 | 直击 −199.7（预期 149.7 × 0.5 ÷ 0.375 = 199.6） | 已证实（dev.2 旧公式下的数值） |
 | 彼岸·极 | 2 次自动爆炸后变“极”，敌人得到 `InDebuffArea.UltraFlower` 标签，原版 UltraFlower 效果打出一次约 −300；挂上大花的循环特效 `NS_GuiTouBlade_Flower_301_Loop` | 已证实 |
 | 用户实战中的一次铺花 | 14 朵花几乎同时出现（推断是同一招的内外两圈 6 + 8），旧的“必须是一个圆”的判定没有铺开它；已改成同一瞬间 5 朵以上就整体按中心放大 | 已证实（日志）/ 推断（同心圆） |
 
@@ -314,6 +314,6 @@ CDO：`CanUseSpecial=true`、**`SpecialCooldown=0.4`**、**`Max Flowers Default=
 
   【已证实】所以 mod 默认用 `CantBreakTarget`（`ultraCantBreak`）。
 - `NonLethal` 这个名字不代表打不死：两种计算器都会把血量打到 0。【已证实】
-- **E 不受影响。** 自动爆炸之后按 E：直击 −217.1，灼烧 67.4 + 91 + 91，和原版一致。【已证实】
-- 15:05:42 那一轮：重载后、花出现之前，角色移动并一击打死杀气满的木桩（−500 血、−200 杀气）。原因未知，待问用户当时是否在操作。【已观察】
-- `BP_Monster_FemaleDoll_QinNv` 作为木桩时，这一轮完全没有受到伤害（杀气、血量都没变），原因未查。【已观察】
+- **E 不受影响。** 自动爆炸之后按 E，TwinAxe 上依次掉 −217.1、−67.4、−91、−91，和 Sword Thug 上原版 E 的首帧 −217.1（直击 149.7 + 灼烧首跳 67.4）一致。TwinAxe 上首帧之后多出的那一跳 −67.4 从哪来，还没对清楚。【已证实（与原版一致）/ 未知（−67.4 来源）】
+- 未解释的 ×1.35：11-20 未破防 E −293.2 = 217.1 × 1.35；CantBreak 下彼岸·极从 −224.6 跳到 −303.3 = 224.6 × 1.35。来源未查，平衡计算时注意。【已证实（数字）/ 未知（原因）】
+- 15:05:42 那一轮：重载后、花出现之前，角色移动并一击打死杀气满的木桩（−500 血、−200 杀气）。用户确认当时不在电脑前，没有操作。原因未知。【已观察】mod 代码里没有驱动角色移动或攻击的逻辑。【已证实】可能是 computer use 切焦点时的输入残留，或上一轮的 GA 状态残留。【推断】
