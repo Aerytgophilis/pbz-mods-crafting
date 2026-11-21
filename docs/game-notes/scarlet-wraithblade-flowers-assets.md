@@ -325,4 +325,5 @@ CDO：`CanUseSpecial=true`、**`SpecialCooldown=0.4`**、**`Max Flowers Default=
 - 0.1.1 的修复：
   - 记下调低过音量的组件，组件一出现在 `UnusedAkComponents` 里，或调低满 4 s，就恢复到 1.0；
   - 每次加载时把池里所有组件的音量设回 1.0（游戏自己从不重置，所以 1.0 就是原版的值）；
-  - `stop()` 时把记录的组件全部恢复。【待验证】
+  - `stop()` 时把记录的组件全部恢复。
+- 验证：15:53 加载 0.1.1，日志 `sound pool: 41 AkComponent(s) set back to full volume`；用户确认台词音量恢复正常。【已证实（用户 + 日志）】
