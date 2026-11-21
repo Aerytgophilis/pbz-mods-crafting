@@ -18,3 +18,4 @@
 | 2026-11-21 12:55–13:38 | agent 用 computer use 反复部署 `hongzhuang-guizhan-plus` 0.1.0-dev.1 → dev.2 和 `pbz-testbench` 0.3.0 并按 Alt+F5 自测（约 25 轮，只写这两个已批准的 mod 文件夹）。最后部署的是发布用 `config.json`（盛放预设，`debugLog` 关）和 `README.txt`；testbench 保留自测模式 | 存档在 `backups/2026-11-21/saves-before-selftest/` | agent（用户授权 computer use） |
 | 2026-11-21 14:59 | 重新部署 `hongzhuang-guizhan-plus` 0.1.0-dev.4：自动爆炸和彼岸·极默认杀气只削到 0.1（`tickCantBreak` / `ultraCantBreak`）；本轮 `debugLog` 开着做自测。按已批准的范围部署 | 不需要备份 | agent |
 | 2026-11-21 15:01–15:04 | agent 用 computer use 自测“花只削到 0.1”：重新部署 `pbz-testbench`（临时改木桩种类和距离）和 `hongzhuang-guizhan-plus`（临时改 `tickDamageScale` / `ultraAfterTicks`）3 轮。最后部署的是 0.1.0 的发布配置（盛放，`debugLog` 关），testbench 恢复原配置 | 不需要备份 | agent（用户授权 computer use） |
+| 2026-11-21 15:05 | 自测铸魂计数溢出：临时部署 `hongzhuang-guizhan-plus`（彼岸·极关、间隔 1.5 s、`tickDamageScale` 0.17）和 `pbz-testbench`（250 cm、`dummyMinHealth` 0）。重载后角色自己移动并在花出现前一击打死木桩（疑似有人在操作），测试中止，两个配置都恢复成发布版并重新部署 | 不需要备份 | agent（用户授权 computer use） |

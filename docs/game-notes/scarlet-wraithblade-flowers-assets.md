@@ -295,3 +295,5 @@ CDO：`CanUseSpecial=true`、**`SpecialCooldown=0.4`**、**`Max Flowers Default=
   - 盛放默认数值、300 cm 的一轮：两次自动爆炸后杀气都是 0.1 → 0.1，木桩最后被 UltraFlower 打空血死亡，同样没有处决。【已证实】
 - 结论：花不再破防，近处也不再触发角色自动处决。敌人仍会被花**打空血**而死（UltraFlower 每跳约 225，对小怪很致命，这是原版资产的数值）。【已证实】
 - `BP_Monster_FemaleDoll_QinNv` 作为木桩时，这一轮完全没有受到伤害（杀气、血量都没变），原因未查。【已观察】
+- **还没堵上的第三条路（待测）**：铸魂计数溢出 `GE_Weapon_GuiTouBlade_Evolution_HitCounter_Explode` 的命中组件是物理 2.0、杀气（AngerDamage）2.0、元素 2.0，计算器 `PBZPlayerNonLethal`（导出 `UpgradeData/GE_Weapon_GuiTouBlade_Evolution_HitCounter_Explode.json`）。每次自动爆炸都会给计数 +1，所以第 5 次（或玩家攒到 4 层后的下一次自动爆炸）溢出时很可能破防，进而触发近身自动处决。今天的几轮都在计数 1～2 时木桩就死了，没有测到。【已证实（导出字段）/ 推断（会破防）】
+- 未做 A/B：`CantBreakTarget`（`PBZNormal` 类）是否比原版 `PBZPlayerNonLethal` 更容易致死。按原计算器的名字推测，原版的彼岸·极可能打不死敌人，换成 `CantBreakTarget` 后就能打死了。【未知】
