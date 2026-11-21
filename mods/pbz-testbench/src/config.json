@@ -1,13 +1,29 @@
 {
   "enabled": true,
-  "measure": { "enabled": true, "radius": 3000 },
+  "measure": {
+    "enabled": true,
+    "radius": 3000
+  },
   "spawn": {
     "enabled": true,
     "class": "/PBZCombatAsset/ActorData/Mobs/003_MaleThug/BP_Monster_MaleThug_Sword_Blue.BP_Monster_MaleThug_Sword_Blue_C",
     "count": 1,
-    "distance": 500,
+    "distance": 150,
     "spacing": 300,
     "dummy": true
   },
-  "dummyMinHealth": 0.25
+  "dummyMinHealth": 0.05,
+  "dump": {
+    "enabled": false,
+    "weaponFilter": ""
+  },
+  "selftest": {
+    "enabled": true,
+    "flowersAt": 1.5,
+    "count": 6,
+    "ringRadius": 80,
+    "eAt": 0,
+    "endAt": 45,
+    "noHitCounter": true
+  }
 }

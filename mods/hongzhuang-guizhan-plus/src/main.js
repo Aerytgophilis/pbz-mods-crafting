@@ -1,180 +1,594 @@
 // Scarlet Wraithblade Plus (hongzhuang-guizhan-plus) — PBZModLoader mod (Kintaro fork 2.1.0)
 // MIT License. Game build 26367565 (CL-302256_JKS-17280).
 //
-// Stage: minimal verification (step 1, phase 1). Three checks, each with its own switch and log lines:
-//   a) periodic explosion: every `tickInterval` s of a flower's own age (game time), spawn its explosion; the flower stays.
-//   b) E (manual explode): explode all flowers, keep them, and do NOT remove the HasFlower GE.
-//   c) E cooldown: passive `SpecialCooldown` = `manualCooldown`.
-// The explosion path copies the passive's "Process Explosion" bytecode (docs/game-notes/scarlet-wraithblade-flowers-assets.md §2):
-//   BD.CreateBullet(identity, passive) -> Initialize(null, avatar, passive, BD, false) -> "Parent Bullet Transforms" = positions -> Start()
-// without the trailing Deactivate loop.
+// Effect 1 (field flowers), spec v3.1-v3.3 in README.md:
+//   - auto explosion every `tickInterval` s of each flower's own age (game time); the flower stays. Damage x`tickDamageScale`,
+//     plus a Shachi (AngerDamage) term. Lv5- flowers (3 s life) tick every 1.5 s with a remaining-life guard.
+//   - E explodes all flowers and keeps them; E cooldown `manualCooldown`.
+//   - lifetime tier, 生生不息 (linger while enemies stand in the flower), 120 s safety cap: by pausing the flower's own
+//     vanilla "Explode Timer", so expiry stays the vanilla path and stop() just unpauses.
+//   - 彼岸·极: after `ultraAfterTicks` auto explosions, enemies in that flower get the loose tag
+//     CharacterState.AbilityState.GuiTouBlade.InDebuffArea.UltraFlower; the vanilla Debuff's UltraFlower effect has it as
+//     an ongoing requirement, so it switches itself on.
+//   - 断情增幅: while the player has CharacterState.AbilityState.GuiTouDao.Buff, the auto explosion interval x0.5.
+//   - area: flower actors scaled by sqrt(1+p), explosion BD radius x sqrt(1+p), rings spread x sqrt(1+p) around their centre.
+// Explosion path = the passive's "Process Explosion" without the Deactivate loop (game-notes §2, §11):
+//   BD.CreateBullet(identity, passive) -> Initialize(null, avatar, passive, BD, false) -> "Parent Bullet Transforms" -> Start()
 "use strict";
 
 const MOD = "hongzhuang-guizhan-plus";
-const VERSION = "0.0.3-verify";
+const VERSION = "0.1.0-dev.1";
 const UE = require("ue");
 const puerts = require("puerts");
 
 const P_FLOWER = "/PBZCombatAsset/ActorData/Players/Hun/Weapon/GuiTouBlade/FlowerBullet/BP_Hun_GuiTouBlade_Flower_Base.BP_Hun_GuiTouBlade_Flower_Base_C";
 const P_PASSIVE = "/PBZCombatAsset/ActorData/Players/Hun/Abilities/AHuaBlade/GA_Hun_GuiTouBlade_Passive.GA_Hun_GuiTouBlade_Passive_C";
-const STOCK_COOLDOWN = 0.4; // passive CDO SpecialCooldown (asset default)
-const POLL_MS = 50;         // how often we look; the decision itself uses game time (timer elapsed), so pause/slomo are respected
+const P_BD_EXPLODE = [
+    "/PBZCombatAsset/ActorData/Players/Hun/BulletData/LongBlade/GuiTouBlade/Flower/BD_Hun_GuiTouBlade_Flower_Explode.BD_Hun_GuiTouBlade_Flower_Explode",
+    "/PBZCombatAsset/ActorData/Players/Hun/BulletData/LongBlade/GuiTouBlade/Flower/BD_Hun_GuiTouBlade_Flower_Big_Explode.BD_Hun_GuiTouBlade_Flower_Big_Explode",
+];
+const P_COMBAT_UTILS = "/PBZCombatAsset/Prototypes/BPL_PBZCombatUtils.BPL_PBZCombatUtils_C";
+const TAG = {
+    canManual: "CharacterState.WeaponUpgrade.GuiTouBlade.CanManualExplode",
+    canBuff: "CharacterState.WeaponUpgrade.GuiTouBlade.CanBuff",
+    canCharge: "CharacterState.WeaponUpgrade.GuiTouBlade.CanCharge",
+    evolution: "CharacterState.WeaponUpgrade.GuiTouBlade.Evolution",
+    duanqing: "CharacterState.AbilityState.GuiTouDao.Buff",
+    ultra: "CharacterState.AbilityState.GuiTouBlade.InDebuffArea.UltraFlower",
+    dmgPhys: "Damage.Attack.Target.PhysicalDamage",
+    dmgElem: "Damage.Attack.Target.ElementDamage",
+    dmgAnger: "Damage.Attack.Target.AngerDamage",
+};
+const STOCK_COOLDOWN = 0.4;   // passive CDO SpecialCooldown
+const STOCK_LIFETIME = 15;    // Lv5+ flower life (Get Lifetime)
+const POLL_MS = 50;           // how often we look; every decision uses game time
+const MOD_MULTIPLY = 1, MOD_ADD = 0; // EGenericValueModifyType
+
+// Fixed constants (spec v3.3 "写死的常量"; tuned in game).
+const K = {
+    tickCoalesce: 0.4,        // take along flowers due within this many seconds: one ring = one bullet
+    tickIntervalEarly: 1.5,   // Lv5- flowers live 3 s
+    earlyShachiScale: 0.5,
+    tickShachiSmall: 0.25,    // half of Boss AHua flower explosion AngerDamage (0.5 / 1.0)
+    tickShachiBig: 0.5,
+    ultimateTickFactor: 0.5,  // 断情: interval x this
+    // Damage of an automatic explosion = tickDamageScale x (hit + burn) of a normal one. Measured 2026-11-21 (Lv30, Sword
+    // Thug): hit 149.7, burn (GE_Hun_GuiTouBlade_Explode) 67.4 + 91 + 91 = 249.4, so the burn is ~62.5% of the total.
+    // Automatic explosions drop the burn and scale the hit by tickDamageScale / (1 - burnShare).
+    tickBurn: false,          // keep the after-hit burn GE on automatic explosions
+    burnShare: 0.625,
+    burnRestoreDelay: 0.15,   // when tickBurn is false: the burn GE stays blank this long after an automatic explosion
+    remainGuard: 0.3,         // no auto explosion this close to expiry (the expiry explosion follows)
+    maxTickSounds: 4,         // per auto explosion batch
+    maxTickParticles: 16,
+};
 
 const log = (m) => console.log(`[PBZMOD] [${MOD}] ${m}`);
 const KSL = UE.KismetSystemLibrary;
 const valid = (o) => { try { return !!o && KSL.IsValid(o); } catch (e) { return false; } };
 const pathOf = (o) => { try { return KSL.GetPathName(o); } catch (e) { return String(o); } };
+const r2 = (x) => Math.round(x * 100) / 100;
 
-// ---- config (re-read on every load, so Alt+F5 picks up edits) ----
-const DEFAULTS = { enabled: true, debugLog: true, tickInterval: 4.0, tickCoalesce: 0.4, tickShake: false, manualCooldown: 5.0, manualKeepsFlower: true };
-let cfg = { ...DEFAULTS };
-try { cfg = { ...DEFAULTS, ...require("./config.json") }; } catch (e) { log("config.json not read, using defaults: " + e); }
-const dbg = (m) => { if (cfg.debugLog) log(m); };
+// ======================================================================= config
+const PRESETS = {
+    "含苞": { flowerAreaScale: 0, flowerLifetime: 15, tickInterval: 6, tickDamageScale: 0.25, lingerEnabled: false, ultraEnabled: false },
+    "盛放": { flowerAreaScale: 0.25, flowerLifetime: 15, tickInterval: 4, tickDamageScale: 0.4, lingerEnabled: true, ultraEnabled: true },
+    "花海": { flowerAreaScale: 0.8, flowerLifetime: 25, tickInterval: 3, tickDamageScale: 0.5, lingerEnabled: true, ultraEnabled: true },
+};
+const PRESET_ALIAS = { bud: "含苞", hanbao: "含苞", bloom: "盛放", shengfang: "盛放", sea: "花海", huahai: "花海" };
+const BASE = {
+    enabled: true, preset: "盛放", tickVolume: 0.25,
+    manualCooldown: 5.0, manualKeepsFlower: true, tickShake: false,
+    lingerMaxLv15: 10, lingerMaxLv20: 20, lingerSafetyCap: 120, ultraAfterTicks: 2,
+    areaSpreadRings: true, debugLog: false,
+};
+// [min, max, kind]. kind "tier": listed values are the supported tiers; others are allowed but warned about.
+const RANGE = {
+    flowerAreaScale: [0, 2, [0, 0.25, 0.4, 0.8, 2]], flowerLifetime: [15, 60, [15, 25, 60]],
+    tickInterval: [1.5, 30], tickDamageScale: [0, 1], tickVolume: [0, 1], manualCooldown: [0.4, 60],
+    lingerMaxLv15: [0, 120], lingerMaxLv20: [0, 120], lingerSafetyCap: [0, 600], ultraAfterTicks: [1, 10],
+};
+// `_probe` (only read when debugLog is on): overrides of the fixed constants K, for in-game probes. Not documented.
+const BOOL = ["enabled", "manualKeepsFlower", "tickShake", "lingerEnabled", "ultraEnabled", "areaSpreadRings", "debugLog"];
+const LATER = ["extraWhiteFlowersLv25", "extraWhiteFlowersLv30", "whiteFlowerTargeting"]; // effect 2, not in this version
 
-// ---- shared state: survives hot reload. Every load resets the switches explicitly (no `??=` carry-over of on=false). ----
+// JSON with // and /* */ comments and trailing commas (we read the file ourselves, so it does not depend on the loader).
+function stripJsonc(s) {
+    let out = "", i = 0, str = false;
+    while (i < s.length) {
+        const c = s[i], n = s[i + 1];
+        if (str) { out += c; if (c === "\\") { out += n || ""; i += 2; continue; } if (c === '"') str = false; i++; continue; }
+        if (c === '"') { str = true; out += c; i++; continue; }
+        if (c === "/" && n === "/") { while (i < s.length && s[i] !== "\n") i++; continue; }
+        if (c === "/" && n === "*") { i += 2; while (i < s.length && !(s[i] === "*" && s[i + 1] === "/")) i++; i += 2; continue; }
+        out += c; i++;
+    }
+    return out.replace(/,(\s*[}\]])/g, "$1");
+}
+function readConfigText() {
+    try {
+        const p = KSL.ConvertToAbsolutePath(String(__dirname).replace(/[\\/]+$/, "") + "/config.json");
+        if (!UE.BlueprintPathsLibrary.FileExists(p)) return { err: "config.json not found at " + p };
+        const out = puerts.$ref("");
+        if (!UE.EasyCsv.LoadStringFromLocalFile(p, out)) return { err: "config.json could not be read" };
+        return { text: String(puerts.$unref(out)).replace(/^﻿/, "") };
+    } catch (e) { return { err: "reading config.json threw: " + e }; }
+}
+function loadConfig() {
+    let raw = {}, src = "file";
+    const r = readConfigText();
+    if (r.text !== undefined) {
+        try { raw = JSON.parse(stripJsonc(r.text)); } catch (e) { log("config.json is not valid JSON, using the preset defaults: " + e); raw = {}; }
+    } else {
+        log(r.err + "; trying require()");
+        try { raw = require("./config.json"); src = "require"; } catch (e) { log("config.json not read, using defaults: " + e); src = "defaults"; }
+    }
+    let pname = String(raw.preset ?? BASE.preset).trim();
+    pname = PRESET_ALIAS[pname.toLowerCase()] || pname;
+    if (!PRESETS[pname]) { log(`unknown preset "${raw.preset}", using 盛放 (bloom)`); pname = "盛放"; }
+    const cfg = { ...BASE, ...PRESETS[pname], preset: pname };
+    const overrides = [];
+    for (const [k, v] of Object.entries(raw)) {
+        if (k === "_probe" && raw.debugLog && v && typeof v === "object") { for (const [pk, pv] of Object.entries(v)) if (pk in K) { K[pk] = pv; log(`probe: ${pk} = ${JSON.stringify(pv)}`); } continue; }
+        if (k.startsWith("_") || k === "preset") continue;
+        if (LATER.includes(k)) { log(`"${k}" belongs to effect 2 (white flowers), not in this version; ignored`); continue; }
+        if (!(k in cfg)) { log(`unknown setting "${k}" ignored`); continue; }
+        if (BOOL.includes(k)) { cfg[k] = !!v; }
+        else {
+            let x = Number(v);
+            const rg = RANGE[k];
+            if (!Number.isFinite(x)) { log(`"${k}": ${JSON.stringify(v)} is not a number, keeping ${cfg[k]}`); continue; }
+            if (rg) {
+                if (k === "lingerSafetyCap" && x > 0 && x < 30) { log(`lingerSafetyCap ${x} raised to 30 (0 = no cap)`); x = 30; }
+                if (x < rg[0] || x > rg[1]) { const y = Math.min(rg[1], Math.max(rg[0], x)); log(`"${k}": ${x} is out of range ${rg[0]}..${rg[1]}, using ${y}`); x = y; }
+                if (rg[2] && !rg[2].includes(x)) log(`"${k}": ${x} is not one of the tested tiers (${rg[2].join(" / ")}); used as is`);
+            }
+            if (k === "ultraAfterTicks") x = Math.round(x);
+            cfg[k] = x;
+        }
+        if (k in PRESETS[pname] ? PRESETS[pname][k] !== cfg[k] : BASE[k] !== cfg[k]) overrides.push(k);
+    }
+    log(`config (${src}): ${pname}` + (overrides.length ? ` + ${overrides.length} custom (${overrides.join(", ")})` : "") +
+        ` -> area +${Math.round(cfg.flowerAreaScale * 100)}%, life ${cfg.flowerLifetime} s, tick ${cfg.tickInterval} s x${cfg.tickDamageScale}, volume ${Math.round(cfg.tickVolume * 100)}%,` +
+        ` linger ${cfg.lingerEnabled ? "on" : "off"}, ultra ${cfg.ultraEnabled ? "on" : "off"}, E cooldown ${cfg.manualCooldown} s, cap ${cfg.lingerSafetyCap || "none"}`);
+    if (cfg.flowerAreaScale >= 0.8 && cfg.flowerLifetime >= 25) log("warning: large flowers (+80% or more) that live 25 s or more can cover the screen and hide enemy attacks");
+    if (cfg.lingerSafetyCap === 0) log("warning: lingerSafetyCap 0 = no cap; an enemy stuck in a wall can keep a flower alive forever (it still counts toward the 25-flower limit)");
+    return cfg;
+}
+
+// ======================================================================= shared state (survives hot reload)
 const shared = globalThis.__hzgzPlus = globalThis.__hzgzPlus || {};
 if (typeof shared.stop === "function") { try { shared.stop(); } catch (e) { } }
+const cfg = loadConfig();
 shared.on = !!cfg.enabled;
 shared.cfg = cfg;
-shared.lastBucket = new Map();   // flower path -> { k, age } (rebuilt from each flower's current age after a reload)
-shared.passives = shared.passives || new Set(); // live passive instances we touched (to put SpecialCooldown back on stop)
-const once = shared.once = new Set(); // one-time log keys, fresh on every load so a reload logs its own first steps
+shared.recs = new Map();                         // flower path -> record
+shared.passives = shared.passives || new Set();  // passive instances whose SpecialCooldown we set
+shared.ultraTagged = new Map();                  // actor path -> actor carrying our UltraFlower loose tag
+shared.bdRadius = shared.bdRadius || new Map();
+shared.pendingRestore = shared.pendingRestore || [];      // burn GEs to put back on the BD events (see explodeKeep)
+function restoreBurns(all) {
+    const t = all ? Infinity : now();
+    shared.pendingRestore = shared.pendingRestore.filter((p) => {
+        if (p.at > t) return true;
+        for (const [ev, ge] of p.list) { try { ev.GameplayEffect = ge; } catch (e) { log("RESTORE of the burn GE failed: " + e); } }
+        return false;
+    });
+}  // BD path -> stock radius (restored on stop)
+const once = new Set();
 const logOnce = (k, m) => { if (!once.has(k)) { once.add(k); log(m); } };
+const dbg = (m) => { if (cfg.debugLog) log(m); };
 
 const gi = puerts.argv.getByName("GameInstance");
+const player = () => { try { return UE.GameplayStatics.GetPlayerCharacter(gi, 0); } catch (e) { return null; } };
+const now = () => UE.GameplayStatics.GetTimeSeconds(gi); // game time: pause and slow motion are respected
 
-function player() { try { return UE.GameplayStatics.GetPlayerCharacter(gi, 0); } catch (e) { return null; } }
+const tagCache = new Map();
+function makeTag(name) {
+    if (tagCache.has(name)) return tagCache.get(name);
+    let t;
+    try { t = UE.PBZBlueprintFunctionLibrary.ConvertStringToGameplayTag(name); }
+    catch (e) { t = new UE.GameplayTag(); t.TagName = name; }
+    tagCache.set(name, t);
+    return t;
+}
+function hasTag(asc, name) { try { return !!asc && asc.HasMatchingGameplayTag(makeTag(name)); } catch (e) { logOnce("tag-err", "HasMatchingGameplayTag failed: " + e); return false; } }
+const ascOf = (a) => { try { return UE.AbilitySystemBlueprintLibrary.GetAbilitySystemComponent(a); } catch (e) { return null; } };
 
+// ======================================================================= weapon state (level, 铸魂, 断情)
+let wst = { at: -1, level: null, lv5: false, evolution: false, duanqing: false };
+let lastWLine = "";
+function weaponState(pawn, t) {
+    const asc = ascOf(pawn);
+    wst.duanqing = hasTag(asc, TAG.duanqing);           // changes often: every poll
+    if (t - wst.at < 1 && wst.at >= 0) return wst;
+    wst.at = t;
+    wst.lv5 = hasTag(asc, TAG.canManual);
+    wst.evolution = hasTag(asc, TAG.evolution);
+    let level = null;
+    try {
+        const bp = UE.SubsystemBlueprintLibrary.GetWorldSubsystem(pawn, UE.PBZBackPackSubsystem.StaticClass());
+        const out = puerts.$ref(0);
+        if (valid(bp) && bp.GetCurrentHoldingWeaponLevel(true, out)) level = Number(puerts.$unref(out));
+    } catch (e) { logOnce("lvl-err", "GetCurrentHoldingWeaponLevel failed, falling back to upgrade tags: " + e); }
+    if (!(level > 0)) level = wst.evolution ? 30 : hasTag(asc, TAG.canCharge) ? 25 : wst.lv5 ? 5 : 1; // fallback only
+    wst.level = level;
+    const line = `weapon level ${level}, Lv5 tag ${wst.lv5}, Evolution tag ${wst.evolution}, CanBuff tag ${hasTag(asc, TAG.canBuff)}`;
+    if (line !== lastWLine) { lastWLine = line; log(line); }
+    return wst;
+}
+function lingerMax(w) {
+    if (!cfg.lingerEnabled) return 0;
+    if (w.level >= 30) return Infinity;
+    if (w.level >= 20) return cfg.lingerMaxLv20;
+    if (w.level >= 15) return cfg.lingerMaxLv15;
+    return 0;
+}
+let lastDuanqing = false;
+
+// ======================================================================= flowers
 function playerFlowers(pawn) {
     const cls = UE.Class.Load(P_FLOWER);
     if (!cls) return [];
     const out = puerts.$ref(UE.NewArray(UE.Actor));
     UE.GameplayStatics.GetAllActorsOfClass(gi, cls, out);
-    const arr = puerts.$unref(out), list = [];
+    const arr = puerts.$unref(out), list = [], me = pathOf(pawn);
     for (let i = 0; i < arr.Num(); i++) {
         const f = arr.Get(i);
         if (!valid(f)) continue;
         let owner = null;
         try { owner = f.GetOwnerAvatar(); } catch (e) { owner = f.BulletOwnerAvatar; }
-        if (owner !== pawn && pathOf(owner) !== pathOf(pawn)) continue; // drops Boss AHua flowers (same base class)
+        if (owner !== pawn && pathOf(owner) !== me) continue; // drops Boss AHua flowers (same base class)
         list.push(f);
     }
     return list;
 }
-
 function flowerTransform(f) {
     try { const r = puerts.$ref(new UE.Transform()); f.GetBulletTransform(r); return puerts.$unref(r); }
     catch (e) { return f.GetTransform(); }
 }
+const isBig = (f) => /_Big_C/.test(pathOf(f.GetClass ? f.GetClass() : f)) || /Flower_Big/.test(pathOf(f));
 
-// Explode `flowers` without removing them. Groups by explosion BulletData like "Process Explosion" does: one bullet per group.
-// Returns the number of explosion bullets started.
-function explodeKeep(passive, flowers, why) {
+let healthAttr = null;
+function alive(a) {
+    try {
+        if (!healthAttr) healthAttr = UE.PBZBlueprintFunctionLibrary.MakeAttribute("Health", UE.BasicAttributeSet.StaticClass());
+        return UE.PBZBlueprintFunctionLibrary.GetAttributeFromCharacter(a, healthAttr) > 0;
+    } catch (e) { return true; }
+}
+// Enemies (NPC characters, alive) inside this flower, from the flower's own overlap list.
+function enemiesIn(f, pawn) {
+    const out = [];
+    let arr;
+    try { arr = f["Overlapping Actors"]; } catch (e) { logOnce("ov-err", "reading Overlapping Actors failed: " + e); return out; }
+    if (!arr) return out;
+    for (let i = 0; i < arr.Num(); i++) {
+        const a = arr.Get(i);
+        if (!valid(a) || a === pawn) continue;
+        try { if (!a.IsA(UE.PBZCharacter_NPC.StaticClass())) continue; } catch (e) { continue; }
+        if (alive(a)) out.push(a);
+    }
+    return out;
+}
+
+// --- timer helpers (the flower's own vanilla Explode Timer) ---
+function timer(f) {
+    const h = f["Explode Timer"];
+    if (!KSL.K2_TimerExistsHandle(f, h)) return null;           // cleared: being exploded by vanilla code
+    return { h, paused: KSL.K2_IsTimerPausedHandle(f, h), elapsed: KSL.K2_GetTimerElapsedTimeHandle(f, h), remaining: KSL.K2_GetTimerRemainingTimeHandle(f, h) };
+}
+function setPaused(f, h, p) {
+    try { if (p) KSL.K2_PauseTimerHandle(f, h); else KSL.K2_UnPauseTimerHandle(f, h); return true; }
+    catch (e) { logOnce("pause-err", "pausing the flower timer failed (lifetime tiers / linger off): " + e); return false; }
+}
+
+// ======================================================================= explosion
+// puerts TMap: iterate by index (no Keys()).
+function mapEntries(m) {
+    const out = [];
+    if (!m) return out;
+    if (typeof m.GetMaxIndex === "function") {
+        for (let i = 0; i < m.GetMaxIndex(); i++) if (m.IsValidIndex(i)) { const k = m.GetKey(i); out.push([k, m.Get(k)]); }
+    } else if (typeof m.Keys === "function") { const ks = m.Keys(); for (let i = 0; i < ks.Num(); i++) { const k = ks.Get(i); out.push([k, m.Get(k)]); } }
+    return out;
+}
+function attackModules(b) {
+    try {
+        const ms = b.FindModulesByClass(UE.BulletAttackModule.StaticClass()), list = [];
+        for (let i = 0; i < ms.Num(); i++) if (valid(ms.Get(i))) list.push(ms.Get(i));
+        return list;
+    } catch (e) { logOnce("mod-err", "FindModulesByClass(BulletAttackModule) failed: " + e); return []; }
+}
+function attackDataStr(m) {
+    try {
+        const r = puerts.$ref(UE.NewMap(UE.GameplayTag, UE.BuiltinFloat)); m.GetModifiedAttackData(r);
+        return mapEntries(puerts.$unref(r)).map(([k, v]) => `${String(k.TagName).replace("Damage.Attack.Target.", "")}=${r2(v)}`).join(" ") || "(empty)";
+    } catch (e) { return "ERR " + e; }
+}
+// Per-bullet damage change: modifiers on this bullet's own attack module; the shared BD stays untouched.
+function applyTickDamage(b, mods, why) {
+    const ms = attackModules(b);
+    if (!ms.length) { logOnce("no-mod", `[${why}] explosion bullet has no BulletAttackModule: tick damage stays at 100%`); return; }
+    for (const m of ms) {
+        const before = cfg.debugLog || !once.has("dmg-first") ? attackDataStr(m) : "";
+        try {
+            m.AddModifier(makeTag(TAG.dmgPhys), MOD_MULTIPLY, mods.dmg);
+            m.AddModifier(makeTag(TAG.dmgElem), MOD_MULTIPLY, mods.dmg);
+            if (mods.shachi > 0) m.AddModifier(makeTag(TAG.dmgAnger), MOD_ADD, mods.shachi);
+        } catch (e) { logOnce("addmod-err", "AddModifier failed: " + e); return; }
+        const after = attackDataStr(m);
+        logOnce("dmg-first", `[${why}] attack data ${before} -> ${after} (want Physical/Element x${mods.dmg}, AngerDamage +${mods.shachi})`);
+        dbg(`[${why}] ${ms.length} attack module(s); passed dmg x${mods.dmg}, shachi +${mods.shachi}; attack data -> ${after}`);
+    }
+}
+let sfx = null;
+function playSounds(ev, ts, volume) {
+    if (!ev || volume <= 0) return;
+    try { if (!valid(sfx)) sfx = UE.SubsystemBlueprintLibrary.GetWorldSubsystem(player(), UE.PBZSoundFXSubsystem.StaticClass()); } catch (e) { }
+    if (!valid(sfx)) { logOnce("sfx-none", "no PBZSoundFXSubsystem: auto explosions are silent"); return; }
+    for (const t of pickSpread(ts, K.maxTickSounds)) {
+        try {
+            const comp = puerts.$ref(null);
+            const [l, r] = locRot(t);
+            sfx.PBZPostEventAtLocation(ev, l, comp, undefined, r, 0, 1.0);
+            const c = puerts.$unref(comp);
+            if (valid(c) && volume < 1) {
+                try { c.SetOutputBusVolume(volume); logOnce("vol-ok", `auto explosion sound posted, SetOutputBusVolume(${volume}) ok`); }
+                catch (e) { logOnce("vol-err", "SetOutputBusVolume failed (sound at full volume): " + e); }
+            } else if (!valid(c)) logOnce("vol-nocomp", "PBZPostEventAtLocation gave no AkComponent: volume not applied");
+        } catch (e) {
+            logOnce("post-err", "PBZPostEventAtLocation failed (" + e + "), using SpawnAudioUniversal at full volume");
+            try { sfx.SpawnAudioUniversal(ev, player(), "None", t, false, false, 0, 0); } catch (e2) { logOnce("spawnaudio-err", "SpawnAudioUniversal failed: " + e2); }
+        }
+    }
+}
+function locRot(t) {
+    try { const l = puerts.$ref(new UE.Vector()), r = puerts.$ref(new UE.Rotator()), sc = puerts.$ref(new UE.Vector()); UE.KismetMathLibrary.BreakTransform(t, l, r, sc); return [puerts.$unref(l), puerts.$unref(r), puerts.$unref(sc)]; }
+    catch (e) { return [t.Translation, new UE.Rotator(), new UE.Vector(1, 1, 1)]; }
+}
+function pickSpread(list, n) {
+    if (list.length <= n) return list;
+    const out = [];
+    for (let i = 0; i < n; i++) out.push(list[Math.floor(i * list.length / n)]);
+    return out;
+}
+function playParticles(ps, ts) {
+    if (!ps) return;
+    for (const t of ts) {
+        const [l, r, sc] = locRot(t);
+        try { UE.NiagaraFunctionLibrary.SpawnSystemAtLocation(player(), ps, l, r, sc, true, true, 0, true); }
+        catch (e) { logOnce("ps-err", "SpawnSystemAtLocation failed: " + e); return; }
+    }
+}
+
+// Explode `flowers` without removing them; one bullet per explosion BD (like "Process Explosion"). `tick` = { dmg, shachi(f) }
+// for automatic explosions (null for E). Returns the number of bullets started.
+function explodeKeep(passive, flowers, why, tick) {
     const avatar = passive.GetAvatarActorFromActorInfo();
-    const groups = new Map(); // bd path -> { bd, transforms[] }
+    const groups = new Map();
     for (const f of flowers) {
         const bd = f["Explode Bullet Data"];
         if (!valid(bd)) continue;
-        const k = pathOf(bd);
-        if (!groups.has(k)) groups.set(k, { bd, ts: [] });
+        const shachi = tick ? tick.shachi(f) : 0;
+        const k = pathOf(bd) + "|" + shachi;
+        if (!groups.has(k)) groups.set(k, { bd, shachi, ts: [] });
         groups.get(k).ts.push(flowerTransform(f));
     }
     let started = 0;
     for (const [k, g] of groups) {
         const b = g.bd.CreateBullet(new UE.Transform(), passive);
         if (!valid(b)) { logOnce("cb-null", `[${why}] CreateBullet returned nothing for ${k}`); continue; }
-        logOnce("cb-ok", `[${why}] CreateBullet ok: ${pathOf(b)}`);
         b.Initialize(null, avatar, passive, g.bd, false);
-        logOnce("init-ok", `[${why}] Initialize(null, avatar, passive, BD, false) returned`);
-        let arr;
-        try { arr = UE.NewArray(UE.Transform); for (const t of g.ts) arr.Add(t); b["Parent Bullet Transforms"] = arr; }
-        catch (e) {
-            logOnce("pbt-assign", `[${why}] assigning Parent Bullet Transforms failed (${e}); trying Add on the bullet's own array`);
-            const own = b["Parent Bullet Transforms"]; own.Empty(); for (const t of g.ts) own.Add(t);
-        }
-        logOnce("pbt-ok", `[${why}] Parent Bullet Transforms set, count ${b["Parent Bullet Transforms"].Num()} (want ${g.ts.length})`);
-        // Camera shake / rumble are read from the BD in the bullet's PostStart (game-notes §6). For automatic ticks without
-        // `tickShake`, blank them on the shared BD just around Start() and put them back right after (same frame, game thread).
-        const mute = why === "tick" && !cfg.tickShake;
-        let shake, ff;
-        if (mute) {
-            try { shake = g.bd["Explosion Shake"]; ff = g.bd["Explosion Force Feedback"]; g.bd["Explosion Shake"] = null; g.bd["Explosion Force Feedback"] = null; }
-            catch (e) { logOnce("mute-err", "could not blank Explosion Shake: " + e); }
+        const arr = UE.NewArray(UE.Transform);
+        for (const t of g.ts) arr.Add(t);
+        b["Parent Bullet Transforms"] = arr;
+        if (tick) applyTickDamage(b, { dmg: tick.dmg, shachi: g.shachi }, why);
+        // The bullet's PostStart reads shake / rumble / sound / particle from the BD (game-notes §6). For automatic
+        // explosions blank them on the shared BD just around Start() (same frame, game thread), then play capped,
+        // quieter copies ourselves. E keeps everything vanilla.
+        const saved = {};
+        // Particles are blanked (and replayed for a spread subset) only above the per-batch cap.
+        const blank = !tick ? [] : ["Explosion Sound"].concat(g.ts.length > K.maxTickParticles ? ["Explosion Particle"] : [], cfg.tickShake ? [] : ["Explosion Shake", "Explosion Force Feedback"]);
+        for (const fld of blank) { try { saved[fld] = g.bd[fld]; g.bd[fld] = null; } catch (e) { logOnce("blank-" + fld, `could not blank ${fld}: ${e}`); } }
+        const burnSaved = [];
+        if (tick && !K.tickBurn) {
+            try {
+                const evs = g.bd.PreAttackEvents.Events;
+                for (let i = 0; i < evs.Num(); i++) { const ev = evs.Get(i); if (valid(ev) && "GameplayEffect" in ev && ev.GameplayEffect) { burnSaved.push([ev, ev.GameplayEffect]); ev.GameplayEffect = null; } }
+                logOnce("burn-off", `auto explosions: after-hit burn GE blanked on ${burnSaved.length} event(s) around Start()`);
+            } catch (e) { logOnce("burn-err", "could not blank the burn GE: " + e); }
         }
         try { b.Start(); }
         finally {
-            if (mute) { try { g.bd["Explosion Shake"] = shake; g.bd["Explosion Force Feedback"] = ff; } catch (e) { log("RESTORE of Explosion Shake failed: " + e); } }
+            for (const fld of Object.keys(saved)) { try { g.bd[fld] = saved[fld]; } catch (e) { log(`RESTORE of ${fld} failed: ${e}`); } }
+            // The hit reads the burn GE after Start() (next frame or so): restore it a little later (game time).
+            if (burnSaved.length) shared.pendingRestore.push({ at: now() + K.burnRestoreDelay, list: burnSaved });
         }
-        logOnce("start-ok", `[${why}] Start() returned`);
+        if (tick) {
+            if ("Explosion Particle" in saved) playParticles(saved["Explosion Particle"], pickSpread(g.ts, K.maxTickParticles));
+            playSounds(saved["Explosion Sound"], g.ts, cfg.tickVolume);
+        }
         started++;
     }
     return started;
 }
 
-// ---- (a) periodic explosion ----
-function tickPeriodic() {
-    const interval = Number(cfg.tickInterval);
-    if (!(interval > 0)) return;
-    const pawn = player();
-    if (!valid(pawn)) return;
-    const coalesce = Math.max(0, Number(cfg.tickCoalesce) || 0);
-    const seen = new Set(), cand = [];
+// ======================================================================= area (flower size, explosion radius, ring spread)
+const areaK = () => Math.sqrt(1 + cfg.flowerAreaScale);
+function applyBdRadius(k) {
+    for (const p of P_BD_EXPLODE) {
+        try {
+            const bd = UE.Object.Load(p);
+            if (!valid(bd)) { logOnce("bd-miss-" + p, "explosion BD not loaded yet: " + p.split(".").pop()); continue; }
+            if (!shared.bdRadius.has(p)) shared.bdRadius.set(p, bd.ColliderData.Radius);
+            const cd = bd.ColliderData; cd.Radius = shared.bdRadius.get(p) * k; bd.ColliderData = cd;
+            logOnce("bd-r-" + p + k, `explosion radius ${p.split(".").pop()}: ${shared.bdRadius.get(p)} -> ${r2(bd.ColliderData.Radius)}`);
+        } catch (e) { logOnce("bd-r-err", "changing the explosion radius failed: " + e); }
+    }
+}
+function restoreBdRadius() {
+    for (const [p, r] of shared.bdRadius) { try { const bd = UE.Object.Load(p); const cd = bd.ColliderData; cd.Radius = r; bd.ColliderData = cd; } catch (e) { } }
+}
+function scaleFlower(f, k) {
+    try { f.SetActorScale3D(new UE.Vector(k, k, k)); return true; } catch (e) { logOnce("scale-err", "SetActorScale3D on a flower failed: " + e); return false; }
+}
+// A ring is spawned over ~0.1-0.4 s. New flowers wait in `pendingRing` until no new flower came for 0.25 s; a group of
+// 5+ that sits on a circle (radius spread < 25% of the mean) is pushed out from its centre by k. Lines and single
+// flowers (FlowerWalk, big flowers) are left where they are.
+let pendingRing = [], pendingAt = 0;
+function spreadRings(t, k) {
+    if (!pendingRing.length || t - pendingAt < 0.25) return;
+    const g = pendingRing.filter((r) => valid(r.f)); pendingRing = [];
+    if (g.length < 5 || k <= 1.001) return;
+    const ps = g.map((r) => r.f.K2_GetActorLocation());
+    const cx = ps.reduce((s, p) => s + p.X, 0) / ps.length, cy = ps.reduce((s, p) => s + p.Y, 0) / ps.length;
+    const ds = ps.map((p) => Math.hypot(p.X - cx, p.Y - cy)), mean = ds.reduce((s, d) => s + d, 0) / ds.length;
+    const sd = Math.sqrt(ds.reduce((s, d) => s + (d - mean) * (d - mean), 0) / ds.length);
+    if (mean < 50 || sd > 0.25 * mean) { dbg(`not a ring (${g.length} flowers, radius ${r2(mean)} +- ${r2(sd)}): left in place`); return; }
+    for (let i = 0; i < g.length; i++) {
+        const p = ps[i];
+        try { g[i].f.K2_SetActorLocation(new UE.Vector(cx + (p.X - cx) * k, cy + (p.Y - cy) * k, p.Z), false, puerts.$ref(new UE.HitResult()), true); }
+        catch (e) { logOnce("move-err", "moving a flower failed: " + e); return; }
+    }
+    dbg(`ring of ${g.length} spread: radius ${r2(mean)} -> ${r2(mean * k)}`);
+}
+
+// ======================================================================= main tick
+let lastT = null;
+function tickFlowers(pawn) {
+    const t = now();
+    const dt = lastT === null ? 0 : Math.min(0.5, Math.max(0, t - lastT));
+    lastT = t;
+    const w = weaponState(pawn, t);
+    if (w.duanqing !== lastDuanqing) { lastDuanqing = w.duanqing; dbg(`断情 (GuiTouDao.Buff) ${w.duanqing ? "on" : "off"}`); }
+    const k = areaK();
+    if (cfg.flowerAreaScale > 0) applyBdRadius(k);
+    const lMax = lingerMax(w);
+    const cap = cfg.lingerSafetyCap > 0 ? cfg.lingerSafetyCap : Infinity;
+    const ultraOn = cfg.ultraEnabled && w.evolution;
+    const seen = new Set(), due = [], ultraEnemies = new Map();
     let anyStrict = false;
+
     for (const f of playerFlowers(pawn)) {
         const key = pathOf(f);
+        let tm;
+        try { tm = timer(f); } catch (e) { logOnce("timer-err", "reading Explode Timer failed: " + e); continue; }
+        if (!tm) { shared.recs.delete(key); continue; }
         seen.add(key);
-        let age;
-        try {
-            const h = f["Explode Timer"];
-            if (!KSL.K2_IsTimerActiveHandle(f, h)) continue;          // timer cleared (exploding / expired): leave it alone
-            age = KSL.K2_GetTimerElapsedTimeHandle(f, h);              // world timer = game time
-        } catch (e) { logOnce("timer-err", "reading Explode Timer failed: " + e); continue; }
-        // shared.lastBucket: key -> { k: ticks already done (tick n happens at age n*interval), age }
-        let st = shared.lastBucket.get(key);
-        if (!st || age < st.age - 0.05) {                              // new, reused from a pool, or first sight after a reload
-            st = { k: Math.floor(age / interval), age };
-            shared.lastBucket.set(key, st);
-            continue;
+        let rec = shared.recs.get(key);
+        if (rec && rec.f !== f) rec = null;
+        if (rec && !tm.paused && tm.elapsed < rec.lastElapsed - 0.05) rec = null;   // reused from the pool
+        if (!rec) {
+            const life = tm.elapsed + tm.remaining;
+            const early = life < 5;                                                   // 3 s flower (before Lv5)
+            rec = { f, born: t - tm.elapsed, early, big: isBig(f), ticks: 0, lifeUsed: 0, lingerUsed: 0, pausedBy: null,
+                    lifeBudget: early || cfg.flowerLifetime - life < 0.1 ? 0 : cfg.flowerLifetime - life, nextAt: 0, ultra: false };
+            rec.nextAt = rec.born + (early ? K.tickIntervalEarly : cfg.tickInterval);
+            shared.recs.set(key, rec);
+            if (k > 1.001 && scaleFlower(f, k)) rec.scaled = true;
+            if (k > 1.001 && cfg.areaSpreadRings && !rec.big && !early) { pendingRing.push(rec); pendingAt = t; }
+            dbg(`flower seen: ${rec.big ? "big" : "small"}, life ${r2(life)} s${early ? " (early)" : ""}, extra life ${rec.lifeBudget} s, age ${r2(tm.elapsed)}`);
         }
-        st.age = age;
-        const strict = Math.floor(age / interval), loose = Math.floor((age + coalesce) / interval);
-        if (strict > st.k) anyStrict = true;
-        if (loose > st.k) cand.push({ f, st, loose });
+        rec.lastElapsed = tm.elapsed;
+        const age = t - rec.born;
+
+        // --- lifetime: pause the vanilla timer while there is budget (life tier first, then linger) ---
+        if (!rec.early) {
+            if (age >= cap) {
+                if (tm.paused) setPaused(f, tm.h, false);
+                log(`flower reached the ${cap} s safety cap: expiring it`);
+                try { f["Expire Explode"](); } catch (e) { logOnce("expire-err", "Expire Explode failed: " + e); }
+                shared.recs.delete(key); seen.delete(key); continue;
+            }
+            const inside = lMax > 0 || ultraOn ? enemiesIn(f, pawn) : [];
+            if (rec.pausedBy && tm.paused) rec[rec.pausedBy] += dt;               // consume the budget of the last poll
+            let want = null;
+            if (rec.lifeUsed < rec.lifeBudget) want = "lifeUsed";
+            else if (inside.length && rec.lingerUsed < lMax) want = "lingerUsed";
+            if (want && !tm.paused) { if (setPaused(f, tm.h, true)) dbg(`flower timer paused (${want === "lifeUsed" ? "lifetime tier" : "linger, " + inside.length + " enemy(s) inside"})`); }
+            if (!want && tm.paused && rec.pausedBy) { setPaused(f, tm.h, false); dbg(`flower timer resumed (life +${r2(rec.lifeUsed)} s, linger +${r2(rec.lingerUsed)} s)`); }
+            rec.pausedBy = want;
+            if (rec.ultra) for (const a of inside) ultraEnemies.set(pathOf(a), a);
+        }
+
+        // --- automatic explosion ---
+        const live = tm.paused || tm.remaining > K.remainGuard;
+        if (!live) continue;
+        if (t >= rec.nextAt) anyStrict = true;
+        if (t >= rec.nextAt - K.tickCoalesce) due.push(rec);
     }
-    for (const k of [...shared.lastBucket.keys()]) if (!seen.has(k)) shared.lastBucket.delete(k);
-    // A ring spawns over ~0.1-0.4 s. Fire only when some flower is strictly due, and take along every flower that is due
-    // within `tickCoalesce` s, so the whole ring is one bullet (one hit, one sound) instead of 2-4.
-    if (!anyStrict) return;
-    const due = new Map(); // passive path -> { passive, flowers[] }
-    for (const { f, st, loose } of cand) {
-        st.k = loose;
-        const passive = f["Passive Ability"];
-        if (!valid(passive)) { logOnce("no-passive", "flower has no Passive Ability; skipped"); continue; }
-        const pk = pathOf(passive);
-        if (!due.has(pk)) due.set(pk, { passive, flowers: [] });
-        due.get(pk).flowers.push(f);
+    for (const key of [...shared.recs.keys()]) if (!seen.has(key)) shared.recs.delete(key);
+    if (k > 1.001 && cfg.areaSpreadRings) spreadRings(t, k);
+
+    if (anyStrict && due.length) {
+        const byPassive = new Map();
+        for (const rec of due) {
+            const p = rec.f["Passive Ability"];
+            if (!valid(p)) { logOnce("no-passive", "flower has no Passive Ability; skipped"); continue; }
+            const pk = pathOf(p);
+            if (!byPassive.has(pk)) byPassive.set(pk, { p, recs: [] });
+            byPassive.get(pk).recs.push(rec);
+            dumpSetByCaller(p);
+        }
+        for (const { p, recs } of byPassive.values()) {
+            const map = new Map(recs.map((r) => [r.f, r]));
+            const n = explodeKeep(p, recs.map((r) => r.f), "tick", {
+                dmg: K.tickBurn ? cfg.tickDamageScale : cfg.tickDamageScale / (1 - K.burnShare),
+                shachi: (f) => { const r = map.get(f); return (r.big ? K.tickShachiBig : K.tickShachiSmall) * (r.early ? K.earlyShachiScale : 1); },
+            });
+            for (const r of recs) {
+                const iv = r.early ? K.tickIntervalEarly : cfg.tickInterval * (w.duanqing ? K.ultimateTickFactor : 1);
+                r.nextAt = t + iv;                                  // the whole batch shares one phase from now on
+                r.ticks++;
+                if (ultraOn && !r.early && !r.ultra && r.ticks >= cfg.ultraAfterTicks) { r.ultra = true; dbg("flower became 彼岸·极"); }
+            }
+            dbg(`tick: ${recs.length} flower(s) in ${n} bullet(s), kept; interval ${w.duanqing ? "x" + K.ultimateTickFactor + " (断情)" : "normal"}`);
+        }
     }
-    for (const { passive, flowers } of due.values()) {
-        const n = explodeKeep(passive, flowers, "tick");
-        dbg(`tick: ${flowers.length} flower(s) exploded in ${n} bullet(s), kept`);
+    syncUltraTags(ultraEnemies);
+}
+
+// UltraFlower: loose tag on enemies standing in a 极 flower; removed when they leave every 极 flower.
+function syncUltraTags(want) {
+    const tagC = () => UE.BlueprintGameplayTagLibrary.MakeGameplayTagContainerFromTag(makeTag(TAG.ultra));
+    for (const [k, a] of want) if (!shared.ultraTagged.has(k)) {
+        try { UE.AbilitySystemBlueprintLibrary.AddLooseGameplayTags(a, tagC(), false); shared.ultraTagged.set(k, a); dbg("UltraFlower tag on " + k.split(".").pop()); }
+        catch (e) { logOnce("ultra-add", "AddLooseGameplayTags failed (彼岸·极 off): " + e); }
+    }
+    for (const [k, a] of [...shared.ultraTagged]) if (!want.has(k)) {
+        try { if (valid(a)) UE.AbilitySystemBlueprintLibrary.RemoveLooseGameplayTags(a, tagC(), false); } catch (e) { }
+        shared.ultraTagged.delete(k);
     }
 }
 
-// ---- (b)+(c) E override. The mixin goes on once per game run; its body reads `globalThis.__hzgzPlus`, so a reload swaps logic. ----
+// One-time research log: the SetByCaller values the weapon upgrade data gives this passive (DebuffTickShachi, ...).
+let sbcDone = false;
+function dumpSetByCaller(passive) {
+    if (sbcDone) return;
+    sbcDone = true;
+    try {
+        const lib = puerts.blueprint.tojs(UE.Class.Load(P_COMBAT_UTILS));
+        const r = puerts.$ref(UE.NewMap(UE.GameplayTag, UE.BuiltinFloat));
+        const ok = lib.GetWeaponUpgradeSetByCallerDataMap(passive, gi, r);
+        const out = mapEntries(puerts.$unref(r)).map(([k, v]) => `${String(k.TagName).replace("SetByCaller.MainWeapon.GuiTouBlade.", "")}=${r2(v)}`);
+        log(`weapon upgrade SetByCaller (ok=${ok}, level ${wst.level}): ${out.join(", ") || "(none)"}`);
+    } catch (e) { log("SetByCaller dump failed: " + e); }
+}
+
+// ======================================================================= E override (mixin once per game run; body reads globalThis)
 function onTriggerFlowers(passive) {
     const s = globalThis.__hzgzPlus;
     if (!s || !s.on) return false;
-    const c = s.cfg;
-    const pawn = player();
+    const c = s.cfg, pawn = player();
     let avatar = null;
     try { avatar = passive.GetAvatarActorFromActorInfo(); } catch (e) { }
     if (!valid(pawn) || pathOf(avatar) !== pathOf(pawn)) return false; // not the player's passive (Boss subclass inherits it)
-    if (Number(c.manualCooldown) > 0) { passive.SpecialCooldown = Number(c.manualCooldown); s.passives.add(passive); } // (c) read by WaitDelay right after us
-    if (!c.manualKeepsFlower) return false; // vanilla body runs
+    passive.SpecialCooldown = c.manualCooldown; s.passives.add(passive); // read by WaitDelay right after us
+    if (!c.manualKeepsFlower) return false;
     const cur = passive["Current Flowers"], flowers = [];
     for (let i = 0; i < cur.Num(); i++) { const f = cur.Get(i); if (valid(f)) flowers.push(f); }
-    const n = explodeKeep(passive, flowers, "E");
-    dbg(`E: ${flowers.length} flower(s) exploded in ${n} bullet(s), kept; HasFlower GE untouched; cooldown ${passive.SpecialCooldown}`);
+    const n = explodeKeep(passive, flowers, "E", null);
+    dbg(`E: ${flowers.length} flower(s) exploded in ${n} bullet(s), kept; cooldown ${passive.SpecialCooldown}`);
     return true; // handled: skip the vanilla Deactivate loop and the HasFlower GE removal
 }
 shared.onTriggerFlowers = onTriggerFlowers;
@@ -185,12 +599,10 @@ class PassiveMixin {
             const s = globalThis.__hzgzPlus;
             if (s && typeof s.onTriggerFlowers === "function" && s.onTriggerFlowers(this)) return;
         } catch (e) { console.log(`[PBZMOD] [${MOD}] Trigger Flowers override threw, running vanilla: ${e}`); }
-        // vanilla body (bytecode: Process Explosion(Current Flowers); BP_RemoveGameplayEffectFromOwnerWithHandle(Has Flower Handle, -1))
-        this["Process Explosion"](this["Current Flowers"]);
+        this["Process Explosion"](this["Current Flowers"]);  // vanilla body
         this.BP_RemoveGameplayEffectFromOwnerWithHandle(this["Has Flower Handle"], -1);
     }
 }
-
 function ensureMixin() {
     if (shared.mixed && valid(shared.mixed)) return;
     if (shared.mixFailed) return;
@@ -202,7 +614,6 @@ function ensureMixin() {
         log("mixin on GA_Hun_GuiTouBlade_Passive.Trigger Flowers: ok");
     } catch (e) { shared.mixFailed = true; log("mixin on Trigger Flowers FAILED (E stays vanilla): " + e); }
 }
-
 function setCdoCooldown(v) {
     try {
         const cls = UE.Class.Load(P_PASSIVE);
@@ -212,38 +623,17 @@ function setCdoCooldown(v) {
     return false;
 }
 
-// FGameplayTag from a name: the game's own helper first, then the struct's TagName field.
-function makeTag(name) {
-    try { return UE.PBZBlueprintFunctionLibrary.ConvertStringToGameplayTag(name); }
-    catch (e) { logOnce("tag-conv", "ConvertStringToGameplayTag failed (" + e + "), using GameplayTag.TagName"); }
-    const t = new UE.GameplayTag(); t.TagName = name; return t;
-}
-
-// Which weapon-upgrade tags the player has (to map Lv25 / Lv30 to tags: the user states the weapon level, we read the log).
-let lastTagLine = "";
-function logUpgradeTags() {
-    let asc = null;
-    try { asc = UE.AbilitySystemBlueprintLibrary.GetAbilitySystemComponent(player()); } catch (e) { }
-    if (!valid(asc)) return;
-    const names = [];
-    try {
-        for (const t of ["CanManualExplode", "CanBuff", "CanCharge", "Evolution"])
-            if (asc.HasMatchingGameplayTag(makeTag("CharacterState.WeaponUpgrade.GuiTouBlade." + t))) names.push(t);
-    } catch (e) { logOnce("tag-err", "reading tags failed: " + e); return; }
-    const line = names.sort().join(", ") || "(none)";
-    if (line !== lastTagLine) { lastTagLine = line; log("weapon upgrade tags on player: " + line); }
-}
-
-// ---- loop ----
-let timer, errors = 0;
+// ======================================================================= loop / stop
+let timerId, errors = 0;
 function tick() {
     if (!shared.on) return;
     try {
-        if (!valid(player())) return; // title screen / loading
+        const pawn = player();
+        if (!valid(pawn)) return; // title screen / loading
+        restoreBurns(false);
         ensureMixin();
-        logUpgradeTags();
-        if (!shared.cdoSet && Number(cfg.manualCooldown) > 0) shared.cdoSet = setCdoCooldown(Number(cfg.manualCooldown));
-        tickPeriodic();
+        if (!shared.cdoSet) shared.cdoSet = setCdoCooldown(cfg.manualCooldown);
+        tickFlowers(pawn);
         errors = 0;
     } catch (e) {
         log("tick threw: " + (e && e.stack || e));
@@ -251,10 +641,20 @@ function tick() {
     }
 }
 
+// Back to vanilla: unpause every flower timer we paused, unscale flowers, drop our UltraFlower tags, stock radius / cooldown.
+// The mixin stays on the class but falls through to the vanilla body while `on` is false.
 shared.stop = () => {
-    if (timer !== undefined) clearInterval(timer);
-    timer = undefined;
-    shared.on = false; // the mixin stays on the class but falls through to the vanilla body
+    if (timerId !== undefined) clearInterval(timerId);
+    timerId = undefined;
+    shared.on = false;
+    for (const rec of shared.recs.values()) {
+        try { if (!valid(rec.f)) continue; const h = rec.f["Explode Timer"]; if (KSL.K2_TimerExistsHandle(rec.f, h) && KSL.K2_IsTimerPausedHandle(rec.f, h)) KSL.K2_UnPauseTimerHandle(rec.f, h); } catch (e) { }
+        try { if (rec.scaled && valid(rec.f)) rec.f.SetActorScale3D(new UE.Vector(1, 1, 1)); } catch (e) { }
+    }
+    shared.recs.clear();
+    syncUltraTags(new Map());
+    restoreBdRadius();
+    restoreBurns(true);
     setCdoCooldown(STOCK_COOLDOWN);
     shared.cdoSet = false;
     for (const p of shared.passives) { try { if (valid(p)) p.SpecialCooldown = STOCK_COOLDOWN; } catch (e) { } }
@@ -262,8 +662,9 @@ shared.stop = () => {
     shared.stop = undefined;
 };
 
-if (shared.on) timer = setInterval(tick, POLL_MS);
-log(`${VERSION} started (enabled=${shared.on}, tickInterval=${cfg.tickInterval}, manualCooldown=${cfg.manualCooldown}, manualKeepsFlower=${cfg.manualKeepsFlower})`);
+if (shared.on) timerId = setInterval(tick, POLL_MS);
+else log("enabled = false: the mod does nothing (vanilla)");
+log(`${VERSION} started`);
 
 exports.stop = function () {
     const s = globalThis.__hzgzPlus;

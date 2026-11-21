@@ -1,10 +1,12 @@
+// 探针第 2 轮：存在时间 25 s、生生不息（Lv30 无上限）、安全上限 30 s、彼岸·极（自动爆炸 2 次后）
 {
   "enabled": true,
+  "preset": "盛放",
+  "flowerAreaScale": 0,
+  "flowerLifetime": 25,
+  "lingerEnabled": true,
+  "lingerSafetyCap": 30,
+  "ultraEnabled": true,
+  "tickDamageScale": 0,      // 探针：自动爆炸不掉血，好让木桩活着测寿命
   "debugLog": true,
-
-  "tickInterval": 4.0,
-  "tickCoalesce": 0.4,
-  "tickShake": false,
-  "manualCooldown": 5.0,
-  "manualKeepsFlower": true
 }

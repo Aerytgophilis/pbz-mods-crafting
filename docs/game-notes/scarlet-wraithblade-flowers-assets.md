@@ -204,3 +204,47 @@ CDO：`CanUseSpecial=true`、**`SpecialCooldown=0.4`**、**`Max Flowers Default=
 - 这些数值只对应 Lv30、木桩已破防、这一种小怪。
 
 **刷怪循环（pbz-testbench 0.1.0 的 bug）**：当时木桩血量过低就移除并立刻原地补一个，结果新刷的木桩下一次读数就是 0 HP，一分多钟里刷了 250 多次。原因【未知】，可能和原地还在进行的处决或爆炸有关。0.1.1 已改成不自动补。
+
+## 13. 第 2 步运行时实测（2026-11-21，build 26367565，PBZModLoader Kintaro 2.1.0，mod 0.1.0-dev.1 + pbz-testbench 0.3.0，武器 Lv30 已铸魂）
+
+方法：pbz-testbench 自测模式。每次 Alt+F5 在木桩（`BP_Monster_MaleThug_Sword_Blue`，AI 关闭，HP 500，Shachi 200）周围用代码生成一圈小花（`BD_Hun_GuiTouBlade_Flower_Small.CreateBullet` → `Initialize(null, 玩家, 被动, BD, false)` → `Start`），按时间轴调用被动的 `Trigger Flowers`（等于 E），读木桩的血量和杀气。Alt+F5 由 agent 用 computer use 按下（用户授权）。
+
+**武器升级表**（`PBZBackPackSubsystem.GetMainWeaponLevelData`，运行时只读；`GuiTouBlade` 最高 30 级）：
+
+| 等级 | 授予的 GE | SetByCaller（UI 数据） |
+|---|---|---|
+| Lv5 | `GE_Weapon_GuiTouBlade_CanManualExplode` | `DebuffBigShachiVulnerability` 0.2 |
+| Lv10 | 数值 GE（软引用未加载，名字未读出） | `DebuffTickShachi` 0.11，`ExplosionBuffDuration` 2.5 |
+| Lv15 | `GE_Weapon_GuiTouBlade_CanBuff`（断情） | — |
+| Lv20 | 数值 GE | `DebuffTickShachi` 0.14，`ExplosionBuffDuration` 3.0 |
+| Lv25 | `GE_Weapon_GuiTouBlade_CanCharge`（火照黄泉） | — |
+| Lv30 | 数值 GE | `DebuffTickShachi` 0.17，`ExplosionBuffDuration` 3.5 |
+
+- **`Evolution` 不在等级表里**：铸魂列表（`SnapSoulGEDatas`）为空，但用户这把武器“已铸魂 = true”且带 `Evolution` 标签，所以 `Evolution` = 铸魂。【已证实（等级表）/ 推断（来自铸魂）】
+- 玩家身上 Lv30 时的 SetByCaller（`GetWeaponUpgradeSetByCallerDataMap(被动)`）：`DebuffTickShachi` 0.17、`ExplosionBuffDuration` 3.5、`DebuffBigShachiVulnerability` 0.2、`DebuffMovementMultiplier` 0.8。【已证实】
+- mod 用 `GetCurrentHoldingWeaponLevel` 直接读数字等级，Lv15 / Lv20 / Lv30 分档不依赖标签。断情状态的标签推断为 `CharacterState.AbilityState.GuiTouDao.Buff`（`GE_Hun_GuiTouBlade_HasBuff_Base` 授予，`HasBuff_Ultimate` 需要 `CanBuff`）。【已证实（资产）/ 待游戏内核对】
+
+**伤害**（未破防木桩）：
+
+| 项 | 数值 | 依据 |
+|---|---|---|
+| 爆炸直击（原版系数） | **149.7** | 模块里的 `PhysicalDamage` 0.94、`ElementDamage` 0.2（不是 BD 里的 0.2 / 0.2，模块已叠加武器倍率） |
+| 爆炸后的灼烧 `GE_Hun_GuiTouBlade_Explode` | 67.4 + 91 + 91 ≈ **249**（第一跳和直击同帧） | 只见 3 跳，约 1 s |
+| 按子弹改系数：`FindModulesByClass(BulletAttackModule)` → `AddModifier(Physical/Element, Multiply, x)` | ×0.4 → 直击 **59.9**，正好 0.4 | 只改这一颗子弹，共享 BD 不动；E 的子弹系数仍是原版 |
+| 杀气项：`AddModifier(AngerDamage, Add, 0.25)` | 木桩 Shachi **−40** | 设 0 时为 0 |
+| 灼烧不受子弹系数影响 | 两次都是 67.4 / 91 / 91 | |
+| 去掉自动爆炸的灼烧 | 在 `Start()` 前把 BD 的 `PreAttackEvents` 里 `BulletEvent_GameplayEffect.GameplayEffect` 置空，**0.15 s 游戏时间后**再还原：自动爆炸只剩直击，紧接着的 E 仍有灼烧。只在 `Start()` 前后置空无效（命中在 `Start()` 之后才读） | |
+
+所以原版一次爆炸 ≈ 直击 150 + 灼烧 249 ≈ 399，灼烧约占 62.5%。mod 的做法：**自动爆炸不带灼烧，直击 ×(`tickDamageScale` ÷ 0.375)**，盛放 0.4 → 直击约 160，即原版一次爆炸的 40%。【已证实（单一木桩、Lv30）】
+
+**铸魂连击计数（Lv30 `Evolution`）**：被动监听 `GameplayEvent.Hitreact.PostTakeHit.Source`；目标带 `CharacterState.AbilityState.GuiTouBlade.InDebuff`（站在花里）且命中强度匹配 `Hitreact.Strength.Income.{Normal, Break, Knockdown, Knockup, Launchback}` 时，给目标叠一层 `GE_Weapon_GuiTouBlade_Evolution_HitCounter`（上限 5）；溢出时施加 `GE_..._HitCounter_Explode`（物理 / 元素 / 杀气各 2.0，约为花爆炸的 5 倍）。花爆炸的命中强度是 `Normal.Light`，**所以每次自动爆炸都会给花里的敌人加一层计数**，自动爆炸会让铸魂爆发来得更快。【已证实（字节码）/ 推断（自测里木桩 0.5 s 内从满血到 0 就是它）】
+
+**寿命档位**：暂停花自己的 `Explode Timer`（`K2_PauseTimerHandle`）10.04 s 后恢复，25 s 档的花在约 25 s 时按原版路径到期爆炸并消失。【已证实】
+
+**自测要点**：用代码生成的花必须把被动当作 `Initialize` 的 source ability 传进去，否则 `ApplyGameplayEffectWithWeaponUpgradeData` 不施加减益（敌人不掉杀气、没有 `InDebuff`）。先生成一朵读出它的 `Passive Ability`，再生成其余的。【已证实】
+
+**其他**：
+- `config.json` 由 mod 自己读文件（`EasyCsv.LoadStringFromLocalFile`），带 `//`、`/* */` 注释和尾逗号都能解析，中文预设名正常。【已证实】
+- `PBZSoundFXSubsystem.PBZPostEventAtLocation` 返回的 AkComponent 上 `SetOutputBusVolume(0.25)` 调用成功；实际听感待用户确认。【已证实（调用）/ 待核对（听感）】
+- puerts 的 `TMap` 没有 `Keys()`，用 `GetMaxIndex` / `IsValidIndex` / `GetKey` 遍历。
+- 生生不息、安全上限、彼岸·极的伤害、断情增幅、面积档位：本节写成时还没测完。
