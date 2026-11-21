@@ -17,7 +17,7 @@
 "use strict";
 
 const MOD = "hongzhuang-guizhan-plus";
-const VERSION = "0.1.0-dev.3";
+const VERSION = "0.1.0";
 const UE = require("ue");
 const puerts = require("puerts");
 
@@ -28,7 +28,8 @@ const P_BD_EXPLODE = [
     "/PBZCombatAsset/ActorData/Players/Hun/BulletData/LongBlade/GuiTouBlade/Flower/BD_Hun_GuiTouBlade_Flower_Big_Explode.BD_Hun_GuiTouBlade_Flower_Big_Explode",
 ];
 const P_ULTRA_FX = "/PBZVFXPack/VFX/BattleFX/Weapon/GuiTouBlade/NS_GuiTouBlade_Flower_301_Loop.NS_GuiTouBlade_Flower_301_Loop"; // the big flower's loop
-const P_CALC_CANT_BREAK = "/PBZCombatAsset/Config/DamageCalculator/DamageCalculator_CantBreakTarget.DamageCalculator_CantBreakTarget";
+const P_ULTRA_GE = "/PBZCombatAsset/ActorData/Players/Hun/Weapon/GuiTouBlade/GE_Hun_GuiTouBlade_Debuff_Effect_UltraFlower.GE_Hun_GuiTouBlade_Debuff_Effect_UltraFlower_C";
+const P_CALC_CANT_BREAK ="/PBZCombatAsset/Config/DamageCalculator/DamageCalculator_CantBreakTarget.DamageCalculator_CantBreakTarget";
 const P_COMBAT_UTILS = "/PBZCombatAsset/Prototypes/BPL_PBZCombatUtils.BPL_PBZCombatUtils_C";
 const TAG = {
     canManual: "CharacterState.WeaponUpgrade.GuiTouBlade.CanManualExplode",
@@ -64,9 +65,6 @@ const K = {
     hitShare: 0.375,          // 149.7 / 399.1
     firstBurnShare: 0.169,    // 67.4 / 399.1
     burnStripDelay: 0.1,      // game seconds after an automatic explosion before its burn is removed
-    // true: automatic explosions use DamageCalculator_CantBreakTarget (like the vanilla flower Debuff_Tick, which stops
-    // Shachi at 0.1). Off by default (user decision 2026-11-21): automatic explosions break Shachi like a normal hit.
-    tickCantBreak: false,
     remainGuard: 0.3,         // no auto explosion this close to expiry (the expiry explosion follows)
     forceLevel: 0,            // probe only: pretend this weapon level (0 = real level)
     forceDuanqing: false,     // probe only: pretend 断情 is always on
@@ -93,6 +91,11 @@ const BASE = {
     manualCooldown: 5.0, manualKeepsFlower: true, tickShake: false,
     lingerMaxLv15: 10, lingerMaxLv20: 20, lingerSafetyCap: 120, ultraAfterTicks: 2,
     areaSpreadRings: true, debugLog: false,
+    // DamageCalculator_CantBreakTarget (the vanilla flower Debuff_Tick's calculator: Shachi stops at 0.1). A flower that
+    // truly breaks a small enemy near the player makes the player's GA_SimpleExecution_GuiTouBlade fire with no input
+    // (game-notes §13), so both are on by default (user decision 2026-11-21); the break is left to the player's own hits.
+    tickCantBreak: true,      // automatic explosions
+    ultraCantBreak: true,     // 彼岸·极 (UltraFlower GE, vanilla calculator PBZPlayerNonLethal)
 };
 // [min, max, kind]. kind "tier": listed values are the supported tiers; others are allowed but warned about.
 const RANGE = {
@@ -101,7 +104,7 @@ const RANGE = {
     lingerMaxLv15: [0, 120], lingerMaxLv20: [0, 120], lingerSafetyCap: [0, 600], ultraAfterTicks: [1, 10],
 };
 // `_probe` (only read when debugLog is on): overrides of the fixed constants K, for in-game probes. Not documented.
-const BOOL = ["enabled", "manualKeepsFlower", "tickShake", "lingerEnabled", "ultraEnabled", "areaSpreadRings", "debugLog"];
+const BOOL = ["enabled", "manualKeepsFlower", "tickShake", "lingerEnabled", "ultraEnabled", "areaSpreadRings", "debugLog", "tickCantBreak", "ultraCantBreak"];
 const LATER = ["extraWhiteFlowersLv25", "extraWhiteFlowersLv30", "whiteFlowerTargeting"]; // effect 2, not in this version
 
 // JSON with // and /* */ comments and trailing commas (we read the file ourselves, so it does not depend on the loader).
@@ -345,7 +348,7 @@ function applyTickDamage(b, mods, why) {
     const ms = attackModules(b);
     if (!ms.length) { logOnce("no-mod", `[${why}] explosion bullet has no BulletAttackModule: tick damage stays at 100%`); return; }
     let calc = null;
-    if (K.tickCantBreak) {
+    if (cfg.tickCantBreak) {
         try { calc = UE.Object.Load(P_CALC_CANT_BREAK); } catch (e) { }
         if (!valid(calc)) { calc = null; logOnce("calc-miss", "DamageCalculator_CantBreakTarget not found: automatic explosions can break (finish) enemies"); }
     }
@@ -647,6 +650,36 @@ function syncUltraTags(want) {
     }
 }
 
+// 彼岸·极 Shachi: the UltraFlower GE's hit component carries its own calculator (PBZPlayerNonLethal, which lets the 0.3
+// AngerDamage break). With ultraCantBreak we swap in CantBreakTarget on the class default; periodic executions read the
+// definition each time, so it also covers effects already running. stop() puts the stock calculator back.
+function ultraHitComponent() {
+    const cls = UE.Class.Load(P_ULTRA_GE);
+    const cdo = cls && UE.SGameAIFunctionLibrary.GetClassDefaultObject(cls);
+    if (!cdo) return null;
+    const arr = cdo.GEComponents;
+    for (let i = 0; i < arr.Num(); i++) {
+        const c = arr.Get(i);
+        if (valid(c) && c.IsA(UE.HitGameplayEfectComponent.StaticClass())) return c;
+    }
+    return null;
+}
+function setUltraCalc(cantBreak) {
+    try {
+        const c = ultraHitComponent();
+        if (!c) { logOnce("ucalc-miss", "UltraFlower hit component not found: 彼岸·极 Shachi stays vanilla (can break)"); return false; }
+        if (shared.ultraCalcStock === undefined) shared.ultraCalcStock = c.CustomCalculator || null;
+        let want = shared.ultraCalcStock;
+        if (cantBreak) {
+            want = UE.Object.Load(P_CALC_CANT_BREAK);
+            if (!valid(want)) { logOnce("calc-miss2", "DamageCalculator_CantBreakTarget not found: 彼岸·极 can break enemies"); return false; }
+        }
+        c.CustomCalculator = want;
+        dbg(`UltraFlower calculator -> ${want ? pathOf(c.CustomCalculator).split(".").pop() : "(none)"}`);
+        return true;
+    } catch (e) { logOnce("ucalc-err", "UltraFlower calculator swap failed: " + e); return false; }
+}
+
 // One-time research log: the SetByCaller values the weapon upgrade data gives this passive (DebuffTickShachi, ...).
 let sbcDone = false;
 function dumpSetByCaller(passive) {
@@ -718,6 +751,7 @@ function tick() {
         if (!valid(pawn)) return; // title screen / loading
         ensureMixin();
         if (!shared.cdoSet) shared.cdoSet = setCdoCooldown(cfg.manualCooldown);
+        if (!shared.ultraCalcSet) shared.ultraCalcSet = setUltraCalc(cfg.ultraCantBreak) || once.has("ucalc-miss") || once.has("ucalc-err") || once.has("calc-miss2");
         tickFlowers(pawn);
         stripBurns(pawn);
         errors = 0;
@@ -743,6 +777,8 @@ shared.stop = () => {
     shared.pendingStrip = [];
     setCdoCooldown(STOCK_COOLDOWN);
     shared.cdoSet = false;
+    if (shared.ultraCalcStock !== undefined) setUltraCalc(false);
+    shared.ultraCalcSet = false;
     for (const p of shared.passives) { try { if (valid(p)) p.SpecialCooldown = STOCK_COOLDOWN; } catch (e) { } }
     shared.passives.clear();
     shared.stop = undefined;

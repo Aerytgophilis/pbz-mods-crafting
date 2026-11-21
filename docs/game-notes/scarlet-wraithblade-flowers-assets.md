@@ -281,3 +281,17 @@ CDO：`CanUseSpecial=true`、**`SpecialCooldown=0.4`**、**`Max Flowers Default=
 - 原版的花丛减益只把杀气削到 0.1，原版花爆炸没有杀气伤害，所以**原版的花不会触发它**；自动爆炸的杀气项（以及彼岸·极 UltraFlower 自带的 0.3 杀气伤害）会补上最后 0.1，于是近处的小怪被花打破防时，角色会自己冲上去处决。【已证实（触发）/ 推断（原版玩家攻击打破防时同样会触发，用户实战中见过的“一刀砍死持枪鬼差”推断是这个）】
 - 原版破防倍率：E 打破防木桩 −325.7，未破防时 −217.1，**×1.5**；灼烧每跳 67.4 → 101.1。【已证实】
 - 灼烧的处理（dev.3 起）：灼烧照常挂上，首跳与直击同帧，0.1 s 后从被自动爆炸命中的敌人身上移除一层 `GE_Hun_GuiTouBlade_Explode`。实测：直击 92.2 + 首跳 67.4（盛放 0.4）；破防中第 2 次 92.2 × 1.5 + 101.1 = −239.5，之后不再掉血。【已证实】
+
+**处理：花只削到 0.1**（用户 2026-11-21 决定；mod 0.1.0-dev.4 / 0.1.0，pbz-testbench 0.4.0，15:00～15:02）
+
+- 自动爆炸：在这颗子弹的 `BulletAttackModule.DamageCalculator` 上换成 `DamageCalculator_CantBreakTarget`（原本为空，用 BD 的默认值）。日志 `damage calculator (none) -> DamageCalculator_CantBreakTarget`。【已证实】
+- 彼岸·极：`GE_Hun_GuiTouBlade_Debuff_Effect_UltraFlower` 的类默认对象里，`GEComponents` 中的 `HitGameplayEfectComponent`（实际类 `PBZHitGameplayEffectComponent`）有 `CustomCalculator = DamageCalculator_PBZPlayerNonLethal`。运行时把它换成 `CantBreakTarget`，`stop()` 时换回。【已证实（字段与替换都在日志里）】
+- 实测（木桩 `MaleThug_Sword_Blue`，HP 500，AI 关，离角色 250 cm，`tickDamageScale` 临时 0.17、`ultraAfterTicks` 1）：
+  - 花丛减益：杀气 200 → 0.1；
+  - 自动爆炸：−67.8，杀气保持 0.1；
+  - UltraFlower：−224.6（未破防数值），杀气保持 0.1；
+  - 再一跳 −207.6，血量归零死亡，杀气仍为 0.1。
+  - 全程 `player Execution false`，没有来源为 `GA_SimpleExecution_GuiTouBlade` 的子弹，角色没有位移。
+  - 盛放默认数值、300 cm 的一轮：两次自动爆炸后杀气都是 0.1 → 0.1，木桩最后被 UltraFlower 打空血死亡，同样没有处决。【已证实】
+- 结论：花不再破防，近处也不再触发角色自动处决。敌人仍会被花**打空血**而死（UltraFlower 每跳约 225，对小怪很致命，这是原版资产的数值）。【已证实】
+- `BP_Monster_FemaleDoll_QinNv` 作为木桩时，这一轮完全没有受到伤害（杀气、血量都没变），原因未查。【已观察】

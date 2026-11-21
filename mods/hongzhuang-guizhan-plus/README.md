@@ -137,7 +137,11 @@
 | `lingerMaxLv15` / `lingerMaxLv20` | 10 / 20 | 0～120 | 生生不息在 Lv15 / Lv20 的最大延长秒数；Lv30 无上限 |
 | `lingerSafetyCap` | 120 | 0 或 30～600 | 每朵花的安全寿命上限（秒），0 = 无上限 |
 | `ultraAfterTicks` | 2 | 1～10 | 同一朵花自动爆炸几次后变成“极” |
+| `tickCantBreak` | true | | 自动爆炸的杀气只削到 0.1（用原版花丛减益的“不破防”伤害计算器 `DamageCalculator_CantBreakTarget`）。false 时自动爆炸能把敌人打破防 |
+| `ultraCantBreak` | true | | 彼岸·极（UltraFlower）的杀气也只削到 0.1。false 时恢复原版计算器 `PBZPlayerNonLethal`，能破防 |
 | `debugLog` | false | | 在 `loader.log` 写详细日志 |
+
+为什么默认不让花破防（用户 2026-11-21 决定）：花把**离角色较近**的小怪真正打破防（杀气 0 后），游戏会让角色自己发动红妆鬼斩的简易处决 `GA_SimpleExecution_GuiTouBlade`，角色在没有任何输入的情况下冲出去出刀（game-notes §13 归因日志：250 cm 出现，600 cm 未出现）。原版的花只削到 0.1，不会这样。所以破防这一下留给玩家自己的攻击；想让花也能破防，把这两项改成 false。
 
 效果 2 的 `extraWhiteFlowersLv25/30`、`whiteFlowerTargeting` 在 v0.1.0 里还不生效（写了会在日志里提示忽略）。
 
@@ -152,7 +156,6 @@
 | `ultimateTickFactor` | 0.5 | 断情期间自动爆炸间隔的倍数 |
 | `remainGuard` | 0.3 | 离到期不到 0.3 s 时不自动爆炸 |
 | `tickBurn` / `hitShare` / `firstBurnShare` | false / 0.375 / 0.169 | 自动爆炸只保留灼烧首跳；直击、灼烧首跳占原版一次爆炸的比例（实测） |
-| `tickCantBreak` | false | true 时自动爆炸用原版花丛减益的“不破防”伤害计算器（杀气只削到 0.1）。用户 2026-11-21 决定默认关 |
 | `maxTickSounds` / `maxTickParticles` | 4 / 16 | 一批自动爆炸最多播几个音效 / 特效 |
 
 ## 实现注意（来自审计，实现层面）

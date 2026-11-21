@@ -24,6 +24,8 @@
   // "lingerMaxLv20": 20,      // 生生不息 Lv20 最多延长（秒）；Lv30 无上限
   // "lingerSafetyCap": 120,   // 每朵花的安全寿命上限（秒），0 = 无上限
   // "ultraAfterTicks": 2,     // 同一朵花自动爆炸几次后变成“极”
+  // "tickCantBreak": true,    // 自动爆炸的杀气只削到 0.1；false = 能破防（近处小怪破防后角色会自动处决）
+  // "ultraCantBreak": true,   // 彼岸·极的杀气只削到 0.1；false = 原版计算器，能破防
 
   "debugLog": false          // true = 在 loader.log 写详细日志
 }
