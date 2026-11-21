@@ -6,7 +6,7 @@
 > 方法：只读公开资料，没有运行任何游戏相关二进制，没有碰游戏目录。
 > 标注：**【已证实】**＝有一手来源（反射 SDK、游戏文本、社区解包产物、实机攻略）；**【推断】**＝由已证实事实推出；**【未知】**＝没找到证据。
 > 注意：本文所有“SDK 行号”指 `blueprints.d.ts` 的下载副本（拉自 Kintaro fork 的 `release` 分支，12,925,975 字节）。
-> 本地副本：`C:\Users\ainno\AppData\Local\Temp\claude\a5487a7d4d498014\dec4f295-ae05-4598-829b-d170d688ea57\scratchpad\flower-research\blueprints.d.ts`
+> 本地副本：`%TEMP%\claude\a5487a7d4d498014\dec4f295-ae05-4598-829b-d170d688ea57\scratchpad\flower-research\blueprints.d.ts`
 > 原始 URL：https://raw.githubusercontent.com/KintaroModding/phantombladezero_pbzmodloader/release/sdk/types/generated/blueprints.d.ts
 > 另一类一手来源：`muyuanjin/PBZKeyForge` 的 `docs/` 里有按 CL-302256 解出的 GA 字节码调用表和时间轴，见 §0。
 

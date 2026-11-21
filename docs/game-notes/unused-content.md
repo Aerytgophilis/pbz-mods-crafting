@@ -244,7 +244,7 @@
 |---|---|---|---|
 | 本地 FModel 导出 | `Z:\Mods_crafting\extracted\fmodel\Exports\ProjectPBZ\`（328 个 JSON） | 红妆 / 阿花资产的引用关系 | 高（本地） |
 | 既有笔记 | `Z:\Mods_crafting\docs\game-notes\scarlet-wraithblade-flowers.md`、`scarlet-wraithblade-flowers-assets.md` | 花的逻辑与未知项 | 中高 |
-| SDK 类型索引 | `C:\Users\ainno\AppData\Local\Temp\claude\a5487a7d4d498014\dec4f295-ae05-4598-829b-d170d688ea57\scratchpad\flower-research\type-index.json`（34,593 条，reflection-generated） | 测试 / 调试 / 原型类型的存在性 | 高（反射） |
+| SDK 类型索引 | `%TEMP%\claude\a5487a7d4d498014\dec4f295-ae05-4598-829b-d170d688ea57\scratchpad\flower-research\type-index.json`（34,593 条，reflection-generated） | 测试 / 调试 / 原型类型的存在性 | 高（反射） |
 | SDK `blueprints.d.ts` | `…\scratchpad\flower-research\blueprints.d.ts`（原始：https://raw.githubusercontent.com/KintaroModding/phantombladezero_pbzmodloader/release/sdk/types/generated/blueprints.d.ts ） | 类成员与继承 | 高（反射，无默认值） |
 | PBZKeyForge 文档 | https://github.com/muyuanjin/PBZKeyForge （`docs/complete-move-weapon-audit.md`、`docs/complete-moves.md`，本地缓存于 `…\flower-research\keyforge\`） | 武器的未接入阶段计数 | 高（同 build 静态解析），但不说明 “未使用” |
 | MetaBot 方法论 | https://metabot.gg/en/phantom-blade-zero/methodology | 确认其数据范围不含 GA/GE 内部数值，也不含未使用内容 | 高（对 “它不含这些” 这件事） |
