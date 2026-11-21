@@ -23,8 +23,8 @@
     "count": 6,
     "ringRadius": 80,
     "eAt": 0,
-    "endAt": 40,
-    "noHitCounter": true,
+    "endAt": 20,
+    "noHitCounter": false,
     "pinDummy": true
   }
 }

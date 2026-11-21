@@ -17,7 +17,7 @@
 "use strict";
 
 const MOD = "hongzhuang-guizhan-plus";
-const VERSION = "0.1.0-dev.1";
+const VERSION = "0.1.0-dev.2";
 const UE = require("ue");
 const puerts = require("puerts");
 
@@ -27,6 +27,7 @@ const P_BD_EXPLODE = [
     "/PBZCombatAsset/ActorData/Players/Hun/BulletData/LongBlade/GuiTouBlade/Flower/BD_Hun_GuiTouBlade_Flower_Explode.BD_Hun_GuiTouBlade_Flower_Explode",
     "/PBZCombatAsset/ActorData/Players/Hun/BulletData/LongBlade/GuiTouBlade/Flower/BD_Hun_GuiTouBlade_Flower_Big_Explode.BD_Hun_GuiTouBlade_Flower_Big_Explode",
 ];
+const P_ULTRA_FX = "/PBZVFXPack/VFX/BattleFX/Weapon/GuiTouBlade/NS_GuiTouBlade_Flower_301_Loop.NS_GuiTouBlade_Flower_301_Loop"; // the big flower's loop
 const P_CALC_CANT_BREAK = "/PBZCombatAsset/Config/DamageCalculator/DamageCalculator_CantBreakTarget.DamageCalculator_CantBreakTarget";
 const P_COMBAT_UTILS = "/PBZCombatAsset/Prototypes/BPL_PBZCombatUtils.BPL_PBZCombatUtils_C";
 const TAG = {
@@ -58,11 +59,13 @@ const K = {
     // Automatic explosions drop the burn and scale the hit by tickDamageScale / (1 - burnShare).
     tickBurn: false,          // keep the after-hit burn GE on automatic explosions
     burnShare: 0.625,
-    // Shachi at 0 is a killing blow for normal enemies. The vanilla flower debuff (Debuff_Tick) uses this calculator
-    // and stops at 0.1; automatic explosions use it too, so they wear Shachi down but never finish an enemy.
-    tickCantBreak: true,
+    // true: automatic explosions use DamageCalculator_CantBreakTarget (like the vanilla flower Debuff_Tick, which stops
+    // Shachi at 0.1). Off by default (user decision 2026-11-21): automatic explosions break Shachi like a normal hit.
+    tickCantBreak: false,
     burnRestoreDelay: 0.15,   // when tickBurn is false: the burn GE stays blank this long after an automatic explosion
-    remainGuard: 0.3,         // no auto explosion this close to expiry (the expiry explosion follows)
+    remainGuard: 0.3,
+    forceLevel: 0,            // probe only: pretend this weapon level (0 = real level)
+    forceDuanqing: false,     // probe only: pretend 断情 is always on         // no auto explosion this close to expiry (the expiry explosion follows)
     maxTickSounds: 4,         // per auto explosion batch
     maxTickParticles: 16,
 };
@@ -204,7 +207,7 @@ let wst = { at: -1, level: null, lv5: false, evolution: false, duanqing: false }
 let lastWLine = "";
 function weaponState(pawn, t) {
     const asc = ascOf(pawn);
-    wst.duanqing = hasTag(asc, TAG.duanqing);           // changes often: every poll
+    wst.duanqing = K.forceDuanqing || hasTag(asc, TAG.duanqing);   // changes often: every poll
     if (t - wst.at < 1 && wst.at >= 0) return wst;
     wst.at = t;
     wst.lv5 = hasTag(asc, TAG.canManual);
@@ -212,11 +215,11 @@ function weaponState(pawn, t) {
     let level = null;
     try {
         const bp = UE.SubsystemBlueprintLibrary.GetWorldSubsystem(pawn, UE.PBZBackPackSubsystem.StaticClass());
-        const out = puerts.$ref(0);
-        if (valid(bp) && bp.GetCurrentHoldingWeaponLevel(true, out)) level = Number(puerts.$unref(out));
-    } catch (e) { logOnce("lvl-err", "GetCurrentHoldingWeaponLevel failed, falling back to upgrade tags: " + e); }
+        // The level of Scarlet Wraithblade itself (weapon id "GuiTouBlade"), not of the weapon in hand.
+        if (valid(bp)) level = Number(bp.GetWeaponLevel("GuiTouBlade", true));
+    } catch (e) { logOnce("lvl-err", "GetWeaponLevel(GuiTouBlade) failed, falling back to upgrade tags: " + e); }
     if (!(level > 0)) level = wst.evolution ? 30 : hasTag(asc, TAG.canCharge) ? 25 : wst.lv5 ? 5 : 1; // fallback only
-    wst.level = level;
+    wst.level = K.forceLevel > 0 ? K.forceLevel : level;
     const line = `weapon level ${level}, Lv5 tag ${wst.lv5}, Evolution tag ${wst.evolution}, CanBuff tag ${hasTag(asc, TAG.canBuff)}`;
     if (line !== lastWLine) { lastWLine = line; log(line); }
     return wst;
@@ -299,9 +302,21 @@ function timer(f) {
     if (!KSL.K2_TimerExistsHandle(f, h)) return null;           // cleared: being exploded by vanilla code
     return { h, paused: KSL.K2_IsTimerPausedHandle(f, h), elapsed: KSL.K2_GetTimerElapsedTimeHandle(f, h), remaining: KSL.K2_GetTimerRemainingTimeHandle(f, h) };
 }
+// The flower's parent (BP_PBZ_ProjectileEmitter) also runs a "Lifetime Timer" (MyData.Lifetime, ~30 s for flowers) that
+// Deactivates the flower silently. It is paused together with the Explode Timer, so it never runs ahead of it.
 function setPaused(f, h, p) {
-    try { if (p) KSL.K2_PauseTimerHandle(f, h); else KSL.K2_UnPauseTimerHandle(f, h); return true; }
+    try {
+        if (p) KSL.K2_PauseTimerHandle(f, h); else KSL.K2_UnPauseTimerHandle(f, h);
+        try {
+            const lt = f["Lifetime Timer"];
+            if (KSL.K2_TimerExistsHandle(f, lt)) { if (p) KSL.K2_PauseTimerHandle(f, lt); else KSL.K2_UnPauseTimerHandle(f, lt); }
+        } catch (e) { logOnce("lt-err", "pausing the flower Lifetime Timer failed (flowers may vanish at ~30 s): " + e); }
+        return true;
+    }
     catch (e) { logOnce("pause-err", "pausing the flower timer failed (lifetime tiers / linger off): " + e); return false; }
+}
+function lifetimeTimerLeft(f) {
+    try { const lt = f["Lifetime Timer"]; return KSL.K2_TimerExistsHandle(f, lt) ? r2(KSL.K2_GetTimerRemainingTimeHandle(f, lt)) : "none"; } catch (e) { return "?"; }
 }
 
 // ======================================================================= explosion
@@ -506,11 +521,10 @@ function tickFlowers(pawn) {
         const key = pathOf(f);
         let tm;
         try { tm = timer(f); } catch (e) { logOnce("timer-err", "reading Explode Timer failed: " + e); continue; }
-        if (!tm) { shared.recs.delete(key); continue; }
+        if (!tm) { dropRec(key); continue; }
         seen.add(key);
         let rec = shared.recs.get(key);
-        if (rec && rec.f !== f) rec = null;
-        if (rec && !tm.paused && tm.elapsed < rec.lastElapsed - 0.05) rec = null;   // reused from the pool
+        if (rec && (rec.f !== f || (!tm.paused && tm.elapsed < rec.lastElapsed - 0.05))) { dropRec(key); rec = null; } // reused from the pool
         if (!rec) {
             const life = tm.elapsed + tm.remaining;
             const early = life < 5;                                                   // 3 s flower (before Lv5)
@@ -520,7 +534,7 @@ function tickFlowers(pawn) {
             shared.recs.set(key, rec);
             if (k > 1.001 && scaleFlower(f, k)) rec.scaled = true;
             if (k > 1.001 && cfg.areaSpreadRings && !rec.big && !early) { pendingRing.push(rec); pendingAt = t; }
-            dbg(`flower seen: ${rec.big ? "big" : "small"}, life ${r2(life)} s${early ? " (early)" : ""}, extra life ${r2(rec.lifeBudget)} s, age ${r2(tm.elapsed)}, radius ${r2(flowerRadius(f, rec))}`);
+            dbg(`flower seen: ${rec.big ? "big" : "small"}, life ${r2(life)} s${early ? " (early)" : ""}, extra life ${r2(rec.lifeBudget)} s, age ${r2(tm.elapsed)}, radius ${r2(flowerRadius(f, rec))}, emitter lifetime left ${lifetimeTimerLeft(f)}`);
         }
         rec.lastElapsed = tm.elapsed;
         const age = t - rec.born;
@@ -531,7 +545,7 @@ function tickFlowers(pawn) {
                 if (tm.paused) setPaused(f, tm.h, false);
                 log(`flower reached the ${cap} s safety cap: expiring it`);
                 try { f["Expire Explode"](); } catch (e) { logOnce("expire-err", "Expire Explode failed: " + e); }
-                shared.recs.delete(key); seen.delete(key); continue;
+                dropRec(key); seen.delete(key); continue;
             }
             const inside = lMax > 0 || ultraOn ? enemiesIn(f, rec, npcs()) : [];
             if (rec.pausedBy && tm.paused) rec[rec.pausedBy] += dt;               // consume the budget of the last poll
@@ -550,7 +564,7 @@ function tickFlowers(pawn) {
         if (t >= rec.nextAt) anyStrict = true;
         if (t >= rec.nextAt - K.tickCoalesce) due.push(rec);
     }
-    for (const key of [...shared.recs.keys()]) if (!seen.has(key)) shared.recs.delete(key);
+    for (const key of [...shared.recs.keys()]) if (!seen.has(key)) dropRec(key);
     if (k > 1.001 && cfg.areaSpreadRings) spreadRings(t, k);
 
     if (anyStrict && due.length) {
@@ -573,12 +587,28 @@ function tickFlowers(pawn) {
                 const iv = r.early ? K.tickIntervalEarly : cfg.tickInterval * (w.duanqing ? K.ultimateTickFactor : 1);
                 r.nextAt = t + iv;                                  // the whole batch shares one phase from now on
                 r.ticks++;
-                if (ultraOn && !r.early && !r.ultra && r.ticks >= cfg.ultraAfterTicks) { r.ultra = true; dbg("flower became 彼岸·极"); }
+                if (ultraOn && !r.early && !r.ultra && r.ticks >= cfg.ultraAfterTicks) { r.ultra = true; addUltraFx(r); dbg("flower became 彼岸·极"); }
             }
             dbg(`tick: ${recs.length} flower(s) in ${n} bullet(s), kept; interval ${w.duanqing ? "x" + K.ultimateTickFactor + " (断情)" : "normal"}`);
         }
     }
     syncUltraTags(ultraEnemies);
+}
+
+// A 极 flower also shows the big flower's loop effect, attached to it; removed with the flower record.
+function addUltraFx(rec) {
+    try {
+        const ns = UE.Object.Load(P_ULTRA_FX);
+        if (!valid(ns)) { logOnce("ufx-miss", "彼岸·极 effect asset not found: " + P_ULTRA_FX); return; }
+        const k = rec.big ? 1 : 0.5;
+        rec.ultraFx = UE.NiagaraFunctionLibrary.SpawnSystemAttached(ns, rec.f.K2_GetRootComponent(), "None", new UE.Vector(0, 0, 0), new UE.Rotator(), new UE.Vector(k, k, k), 0, false, 0, true, true);
+        if (!valid(rec.ultraFx)) logOnce("ufx-null", "彼岸·极 effect did not spawn");
+    } catch (e) { logOnce("ufx-err", "彼岸·极 effect failed: " + e); }
+}
+function dropRec(key) {
+    const rec = shared.recs.get(key);
+    if (rec && rec.ultraFx) { try { if (valid(rec.ultraFx)) rec.ultraFx.DestroyComponent(); } catch (e) { } }
+    shared.recs.delete(key);
 }
 
 // UltraFlower: loose tag on enemies standing in a 极 flower; removed when they leave every 极 flower.
@@ -681,10 +711,10 @@ shared.stop = () => {
     timerId = undefined;
     shared.on = false;
     for (const rec of shared.recs.values()) {
-        try { if (!valid(rec.f)) continue; const h = rec.f["Explode Timer"]; if (KSL.K2_TimerExistsHandle(rec.f, h) && KSL.K2_IsTimerPausedHandle(rec.f, h)) KSL.K2_UnPauseTimerHandle(rec.f, h); } catch (e) { }
+        try { if (!valid(rec.f)) continue; const h = rec.f["Explode Timer"]; if (KSL.K2_TimerExistsHandle(rec.f, h) && KSL.K2_IsTimerPausedHandle(rec.f, h)) setPaused(rec.f, h, false); } catch (e) { }
         try { if (rec.scaled && valid(rec.f)) rec.f.SetActorScale3D(new UE.Vector(1, 1, 1)); } catch (e) { }
     }
-    shared.recs.clear();
+    for (const key of [...shared.recs.keys()]) dropRec(key);
     syncUltraTags(new Map());
     restoreBdRadius();
     restoreBurns(true);

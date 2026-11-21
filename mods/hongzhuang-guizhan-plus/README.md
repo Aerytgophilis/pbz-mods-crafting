@@ -23,7 +23,7 @@
 | 存在时间 | 3 s / 15 s（Lv5+） | **不变** |
 | 自动周期爆炸 | 无 | Lv5 起每 **4 s** 爆炸一次，**花不消失**；Lv5 前（花只存在 3 s）每 **1.5 s** 爆炸一次，保证到期前至少爆一次 |
 | 自动爆炸的杀气削减 | 花爆炸没有杀气伤害 | **增加杀气伤害**，取 Boss 阿花花爆炸系数的一半：小花 **0.25**、大花 **0.5**；Lv5 前再乘 **0.5** |
-| 自动爆炸的血量伤害 | — | 正常爆炸的 **40%**（只对自动爆炸打折；E 引爆、到期爆炸、白花及其留下的大花都保持原版） |
+| 自动爆炸的血量伤害 | — | 正常爆炸的 **40%**（只对自动爆炸打折；E 引爆、到期爆炸、白花及其留下的大花都保持原版）。**实现（2026-11-21 实测后定）**：原版一次爆炸 = 直击 + 爆炸后的灼烧（`GE_Hun_GuiTouBlade_Explode`），灼烧约占 62.5%。自动爆炸**不带灼烧**，直击 ×(`tickDamageScale` ÷ 0.375)，总量正好是原版的 `tickDamageScale` 倍（盛放：直击 ×1.07，约 160，原版约 399） |
 | 到期 | 爆炸一次并消失 | **不变** |
 | 按 E 引爆 | 全部爆炸，花消失，冷却 0.4 s | 全部爆炸，**花不消失**，冷却 **5 s** |
 | 超上限 | 最旧的花爆炸并消失 | **不变**（原版行为） |
@@ -111,46 +111,81 @@
 
 ## 可配置参数（config.json）
 
-| 参数 | 默认 | 说明 |
+文件里可以写 `//` 和 `/* */` 注释；没写的项用预设的值；超出范围的值会被钳制并在 `loader.log` 写一行说明。改完按 Alt+F5 生效。
+
+**常用项**
+
+| 参数 | 默认（盛放） | 说明 |
 |---|---|---|
-| `tickInterval` | 4.0 | Lv5 起的自动爆炸间隔（秒，游戏时间） |
-| `tickIntervalEarly` | 1.5 | Lv5 前（花寿命 3 s）的自动爆炸间隔；暂定，实测后定 |
-| `tickDamageScale` | 0.4 | 自动爆炸的血量伤害倍率 |
-| `tickShake` | false | 自动爆炸是否震屏、震手柄（E 引爆和到期爆炸始终保持原版的震动） |
-| `tickCoalesce` | 0.4 | 把同一圈花的计时向前对齐几秒，让一圈花合成一次爆炸，而不是连续爆好几下 |
-| `tickShachiSmall` / `tickShachiBig` | 0.25 / 0.5 | 自动爆炸的杀气伤害系数（Boss 花爆炸 0.5 / 1.0 的一半） |
-| `earlyShachiScale` | 0.5 | Lv5 前自动爆炸的杀气系数再乘这个数；暂定，实测后定 |
-| `manualCooldown` | 5.0 | E 引爆冷却 |
-| `manualKeepsFlower` | true | false 时回到原版“引爆即消失” |
-| `extraWhiteFlowersLv25` | 2 | Lv25–29 额外生成的白花数（总数 = 1 + 这个值） |
-| `extraWhiteFlowersLv30` | 4 | Lv30 额外生成的白花数 |
-| `whiteFlowerTargeting` | `"threat"` | `"threat"` 多目标按威胁分配；`"original"` 全部跟随原版目标 |
-| `flowerAreaScale` | 0.25 | 花丛面积增量，可选 0 / 0.25 / 0.4 / 0.8 / 2.0（按面积算，见“可选档位”） |
-| `flowerLifetime` | 15 | Lv5 起花的存在时间，可选 15 / 25 / 60 秒 |
-| `tickVolume` | 0.25 | 自动爆炸音效音量（相对原版爆炸） |
-| `lingerEnabled` | true | 生生不息开关 |
-| `lingerMaxLv15` / `lingerMaxLv20` | 10 / 20 | 生生不息在 Lv15 / Lv20 的最大延长秒数；Lv30 无上限 |
-| `ultraEnabled` | true | 彼岸·极开关（需要铸魂后 Lv30） |
-| `ultraAfterTicks` | 2 | 同一朵花自动爆炸几次后升级为“极” |
+| `enabled` | true | 总开关；false 时 mod 什么都不做 |
+| `preset` | `"盛放"` | `含苞` / `盛放` / `花海`（也可写 `bud` / `bloom` / `sea`），见“设置方案” |
+| `flowerAreaScale` | 0.25 | 花丛面积增量：0 / 0.25 / 0.4 / 0.8 / 2.0（2.0 为高强度） |
+| `flowerLifetime` | 15 | Lv5 起花的存在时间：15 / 25 / 60 秒（60 为高强度） |
+| `tickVolume` | 0.25 | 自动爆炸音量（相对原版爆炸，0～1） |
+| `lingerEnabled` | true | 生生不息 |
+| `ultraEnabled` | true | 彼岸·极（铸魂后 Lv30） |
+
+**高级项**
+
+| 参数 | 默认 | 范围 | 说明 |
+|---|---|---|---|
+| `tickInterval` | 4（花海 3、含苞 6） | 1.5～30 | Lv5 起的自动爆炸间隔（秒，游戏时间） |
+| `tickDamageScale` | 0.4（花海 0.5、含苞 0.25） | 0～1 | 自动爆炸伤害占原版一次爆炸（直击 + 灼烧）的比例 |
+| `manualCooldown` | 5 | 0.4～60 | E 引爆冷却 |
+| `manualKeepsFlower` | true | | false 时回到原版“引爆即消失” |
+| `tickShake` | false | | 自动爆炸是否震屏、震手柄（E 引爆和到期爆炸始终原版） |
+| `lingerMaxLv15` / `lingerMaxLv20` | 10 / 20 | 0～120 | 生生不息在 Lv15 / Lv20 的最大延长秒数；Lv30 无上限 |
+| `lingerSafetyCap` | 120 | 0 或 30～600 | 每朵花的安全寿命上限（秒），0 = 无上限 |
+| `ultraAfterTicks` | 2 | 1～10 | 同一朵花自动爆炸几次后变成“极” |
+| `debugLog` | false | | 在 `loader.log` 写详细日志 |
+
+效果 2 的 `extraWhiteFlowersLv25/30`、`whiteFlowerTargeting` 在 v0.1.0 里还不生效（写了会在日志里提示忽略）。
+
+**写死的常量**（`main.js` 的 `K`，2026-11-21 实测后定）
+
+| 常量 | 值 | 说明 |
+|---|---|---|
+| `tickCoalesce` | 0.4 | 同一圈花在 0.4 s 内到点的合成一次爆炸 |
+| `tickIntervalEarly` | 1.5 | Lv5 前（花寿命 3 s）的自动爆炸间隔 |
+| `earlyShachiScale` | 0.5 | Lv5 前自动爆炸的杀气系数再乘这个数 |
+| `tickShachiSmall` / `tickShachiBig` | 0.25 / 0.5 | 自动爆炸加的杀气伤害（`AngerDamage`），实测 0.25 让小怪木桩掉 40 杀气 |
 | `ultimateTickFactor` | 0.5 | 断情期间自动爆炸间隔的倍数 |
-
-| `enabled` | true | 总开关 |
-| `preset` | `"盛放"` | 含苞 / 盛放 / 花海，见“设置方案” |
-| `lingerSafetyCap` | 120 | 每朵花的安全寿命上限（秒），0 = 无上限 |
-
-> 哪些项给普通玩家、哪些是高级项、哪些写死，见上文“设置方案（规格 v3.3）”。
+| `remainGuard` | 0.3 | 离到期不到 0.3 s 时不自动爆炸 |
+| `tickBurn` / `burnShare` | false / 0.625 | 自动爆炸不带灼烧；灼烧占原版一次爆炸的比例（实测） |
+| `tickCantBreak` | false | true 时自动爆炸用原版花丛减益的“不破防”伤害计算器（杀气只削到 0.1）。用户 2026-11-21 决定默认关 |
+| `maxTickSounds` / `maxTickParticles` | 4 / 16 | 一批自动爆炸最多播几个音效 / 特效 |
 
 ## 实现注意（来自审计，实现层面）
 
 来源：Gemini Neon 跨厂商审计（`docs/research/audits/2026-11-20-neon-design-workflow.md`），以及第 1 步的补查。
 
-- **不改共享 BD。** 自动爆炸用运行时克隆的独立爆炸 BD：伤害系数 ×`tickDamageScale`，加杀气项，`Explosion Shake` 和 `Explosion Force Feedback` 置空，这样自动爆炸不震屏、不震手柄。E 引爆和到期爆炸继续用原 BD。是否震动做成配置项 `tickShake`，默认关。
-- **按每朵花自己的寿命计时**，不用全局时钟。寿命读花的 `Explode Timer` 已过的游戏时间，同一帧到点的花合进同一批（验证版已经这样做）。
+- **不改共享 BD 的伤害。** 自动爆炸的伤害改在这一颗子弹的攻击模块上（`FindModulesByClass(BulletAttackModule)` → `AddModifier`），E 引爆和到期爆炸不受影响。震屏、手柄震动、音效只在 `Start()` 前后临时置空共享 BD 的字段；灼烧 GE 要置空 0.15 s（游戏时间）才生效，因为命中在 `Start()` 之后才读它。（2026-11-21 实测，game-notes §13）
+- **按每朵花自己的寿命计时**，不用全局时钟：第一次看到花时用 `Explode Timer` 已过的时间倒推出生时间，之后用游戏时间（`GetTimeSeconds`）。
+- **寿命档位和生生不息靠暂停花自己的计时器**：`Explode Timer` 和父类的 `Lifetime Timer`（约 30 s，到时静默 `Deactivate`）一起暂停，到期仍走原版路径；停用 mod 时全部恢复。
+- **“花里有敌人”按距离判断**（花的碰撞半径 + 敌人胶囊半径），不用花自己的 `Overlapping Actors`，后者会漏掉仍站在花里的敌人。
 - **前期剩余寿命保护。** 剩余寿命小于约 0.3 s 时不做自动爆炸，避免和到期爆炸重复。
 - **判伤次数要实测。** 一个合批子弹有多个位置都覆盖同一个敌人时，这个敌人吃几次伤害，实测后再定数值。
 - **还原存档前先关 Steam 云同步。** 否则本地还原的旧档会被云端覆盖。
 
+## 安装 / 卸载
+
+需要：PBZModLoader（Kintaro 分支）2.1.0。发布包（`HongzhuangGuizhanPlus-v<版本>.zip`）的目录按游戏目录展开：
+
+```
+ProjectPBZ/PBZModLoader/mods/hongzhuang-guizhan-plus/
+├─ main.js
+├─ config.json
+└─ README.txt
+```
+
+1. 先备份存档 `ProjectPBZ\Saved\SaveGames\`（存档有 Steam 云同步，坏档会被同步上去）。
+2. 把 zip 解压到游戏根目录（有 `ProjectPBZ` 文件夹的那一层）。
+3. 进游戏，`ProjectPBZ\PBZModLoader\loader.log` 里出现 `[hongzhuang-guizhan-plus] 0.1.0 started` 即生效。没有 `loader.log` 时换加载器入口（hid / winmm / dsound / dxgi，见加载器说明）。
+4. 设置：改 `config.json`，游戏里按 Alt+F5。
+5. 卸载：删除 `ProjectPBZ\PBZModLoader\mods\hongzhuang-guizhan-plus\`。mod 不写存档，删除后即回到原版。
+
 ## 状态
 
 - 第 0 步（只读解包）已完成。
-- 第 1 步：最小可行性验证 → 实现效果 1、效果 2。
+- 第 1 步：最小可行性验证已完成（ADR-0001：效果 1 定稿为路线 A）。
+- 第 2 步（2026-11-21）：效果 1 v0.1.0 实现中，数值由 agent 用 pbz-testbench 自测完成（见 game-notes §13）；待用户最终试玩（手感、音量、画面）。效果 2 未开始。

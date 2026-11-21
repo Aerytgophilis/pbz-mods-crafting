@@ -1,12 +1,29 @@
-// 探针第 2 轮：存在时间 25 s、生生不息（Lv30 无上限）、安全上限 30 s、彼岸·极（自动爆炸 2 次后）
+// 红妆鬼斩增强 Scarlet Wraithblade Plus — 设置 / settings
+// 改完在游戏里按 Alt+F5 生效。可以写 // 注释。没写的项用预设的值。
+// Edit, then press Alt+F5 in game. Comments are allowed. Settings you leave out come from the preset.
 {
-  "enabled": true,
-  "preset": "盛放",
-  "flowerAreaScale": 0,
-  "flowerLifetime": 25,
-  "lingerEnabled": true,
-  "lingerSafetyCap": 30,
-  "ultraEnabled": false,
-  "tickDamageScale": 0,      // 探针：自动爆炸不掉血，好让木桩活着测寿命
-  "debugLog": true,
+  // ---------- 常用 / common ----------
+  "enabled": true,           // 总开关 / master switch
+  "preset": "盛放",          // 含苞 bud（接近原版）/ 盛放 bloom（默认）/ 花海 sea（爽快）
+
+  // 下面几项不写就跟随预设；写了就覆盖预设。Leave these out to follow the preset.
+  // "flowerAreaScale": 0.25,  // 花丛面积 +0% / +25% / +40% / +80% / +200%（高强度）：0 / 0.25 / 0.4 / 0.8 / 2
+  // "flowerLifetime": 15,     // 花的存在时间（Lv5 起）15 / 25 / 60（高强度）秒
+  // "lingerEnabled": true,    // 生生不息：花里有敌人时花活得更久（Lv15 / Lv20 / Lv30）
+  // "ultraEnabled": true,     // 彼岸·极（铸魂后 Lv30）
+
+  "tickVolume": 0.25,        // 自动爆炸音量，相对原版爆炸 0 ~ 1 / auto explosion volume
+
+  // ---------- 高级 / advanced ----------
+  // "tickInterval": 4,        // 自动爆炸间隔（秒），最小 1.5
+  // "tickDamageScale": 0.4,   // 自动爆炸伤害 = 原版一次爆炸（直击 + 灼烧）的这个比例，0 ~ 1
+  // "manualCooldown": 5,      // E 引爆冷却（秒）
+  // "manualKeepsFlower": true,// false = E 引爆后花消失（原版）
+  // "tickShake": false,       // 自动爆炸是否震屏 / 震手柄
+  // "lingerMaxLv15": 10,      // 生生不息 Lv15 最多延长（秒）
+  // "lingerMaxLv20": 20,      // 生生不息 Lv20 最多延长（秒）；Lv30 无上限
+  // "lingerSafetyCap": 120,   // 每朵花的安全寿命上限（秒），0 = 无上限
+  // "ultraAfterTicks": 2,     // 同一朵花自动爆炸几次后变成“极”
+
+  "debugLog": false          // true = 在 loader.log 写详细日志
 }
