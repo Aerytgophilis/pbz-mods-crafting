@@ -267,5 +267,17 @@ CDO：`CanUseSpecial=true`、**`SpecialCooldown=0.4`**、**`Max Flowers Default=
 - 花丛减益 `Debuff_Tick` 用 `DamageCalculator_CantBreakTarget`，杀气只削到 **0.1**，不会让敌人真正破防。**§12 的“木桩已破防”应更正为“杀气 0.1，未真正破防”**，那次 −293 是对未破防目标的数值。【已证实（日志）/ 推断（计算器规则，类默认值未导出）】
 - 灼烧、UltraFlower、铸魂计数爆发用 `DamageCalculator_PBZPlayerNonLethal`（处决系统前几段用的非致死计算器）。【推断】
 - 资产里有独立的破防参数（`PDA_GlobalCombatConfig` 的 `Mob Break Duration`、`Mob Break Damage Multiplier` 等，属性 `TakenAdditiveMultiplier_BreakDamage`），没有“杀气为 0 即死”的规则；11-20 的日志里真实敌人杀气到 0 后没死、杀气回升。【已证实（反射）/ 未导出（数值）】
-- 自测（3 次，木桩 AI 关闭、杀气 0.1）：自动爆炸带杀气项把最后 0.1 打掉 → 0.5 s 内角色在无输入的情况下移动、做出处决动作 → 木桩 HP 归零 → 约 1 s 后出现一圈 6 朵小花（`GA_SimpleExecution_GuiTouBlade` 的单体时间轴正是铺 6 朵）。杀气项为 0 时不发生。**推断：玩家的命中让普通敌人真正破防时，原版会自动触发简易处决**；用户 11-20 的“一刀砍死持枪鬼差”（160 杀气一次打空）推断是同一机制。触发处决的事件没有导出。【推断】
-- 对 mod 的含义：自动爆炸带杀气项时，会替玩家打出“破防一击”，让角色在玩家没有操作时自己冲去处决花里的小怪。是否保留由用户决定（`tickCantBreak` 默认关，用户 2026-11-21 要求不要擅自打开）。
+- **更正**：本节早先写的“自动爆炸破防 → 角色自动处决”“置空灼烧引起秒杀”两条推断，都是在没有归因日志时从掉血量反推的，已作废。下面只记归因日志（pbz-testbench 0.4.0 `attribution`：记录每颗玩家子弹的 `BulletData` 和 `BulletSourceAbility`、玩家位移）的结果。
+
+**两种不同的死法**（13:40～13:55，木桩 `MaleThug_Sword_Blue`，HP 500）：
+
+| | 死法 A：角色自动简易处决 | 死法 B：彼岸·极 |
+|---|---|---|
+| 条件 | 敌人被**玩家方的命中**真正打破防（杀气 0.1 → 0），且离角色近：250 cm 出现、600 cm 未出现（400 cm 两次中一次出现，门槛未定） | 彼岸·极开着，花升级为“极”后，UltraFlower 打在破防敌人身上 |
+| 归因 | 约 0.5 s 后玩家位移约 250 cm，随后生成 6 朵小花，`BulletSourceAbility = GA_SimpleExecution_GuiTouBlade_C`；用户亲眼看到角色出刀（无输入） | UltraFlower 一击 −337（未破防时 −224.6，×1.5 = 破防倍率） |
+| 状态 | 已证实（归因日志、用户目视） | 推断（数值吻合） |
+
+- `GA_SimpleExecution_GuiTouBlade` 的触发（运行时读类默认对象）：`AbilityTriggers = [GameplayEvent.Ability.Action.SimpleExecution.Activate]`，`ActivationBlockedTags = CharacterState.Forbid.Ability.SimpleExecution`，没有其他要求。谁发这个事件，资产里看不到（推断在原生代码里）。【已证实（触发标签）/ 未知（发送者）】
+- 原版的花丛减益只把杀气削到 0.1，原版花爆炸没有杀气伤害，所以**原版的花不会触发它**；自动爆炸的杀气项（以及彼岸·极 UltraFlower 自带的 0.3 杀气伤害）会补上最后 0.1，于是近处的小怪被花打破防时，角色会自己冲上去处决。【已证实（触发）/ 推断（原版玩家攻击打破防时同样会触发，用户实战中见过的“一刀砍死持枪鬼差”推断是这个）】
+- 原版破防倍率：E 打破防木桩 −325.7，未破防时 −217.1，**×1.5**；灼烧每跳 67.4 → 101.1。【已证实】
+- 灼烧的处理（dev.3 起）：灼烧照常挂上，首跳与直击同帧，0.1 s 后从被自动爆炸命中的敌人身上移除一层 `GE_Hun_GuiTouBlade_Explode`。实测：直击 92.2 + 首跳 67.4（盛放 0.4）；破防中第 2 次 92.2 × 1.5 + 101.1 = −239.5，之后不再掉血。【已证实】

@@ -13,7 +13,7 @@
 "use strict";
 
 const MOD = "pbz-testbench";
-const VERSION = "0.3.0";
+const VERSION = "0.4.0";
 const UE = require("ue");
 const puerts = require("puerts");
 const P_AILIB = "/SGameAI/FunctionLibrary/BP_SGameAIFunctionLibrary.BP_SGameAIFunctionLibrary_C";
@@ -31,7 +31,7 @@ const DEFAULTS = {
              count: 1, distance: 500, spacing: 300, dummy: true },
     dummyMinHealth: 0.25,
     dump: { enabled: false, weaponFilter: "" },
-    selftest: { enabled: false, flowersAt: 1.5, count: 6, ringRadius: 60, eAt: 10, endAt: 20, noHitCounter: false, pinDummy: false, centerFlower: true },
+    selftest: { enabled: false, flowersAt: 1.5, count: 6, ringRadius: 60, eAt: 10, endAt: 20, noHitCounter: false, pinDummy: false, centerFlower: true, attribution: false },
 };
 let cfg = DEFAULTS;
 try {
@@ -294,6 +294,54 @@ function selftest(pawn) {
     }
 }
 
+// ---- attribution (`selftest.attribution`): which of the player's bullets / montages appear, and when ----
+// Every poll: bullets owned by the player whose status changed (BulletData, source ability, status); the player's
+// current montage (ASC.GetCurrentMontage) when it changes; the player moving more than 20 cm.
+const attr2 = { bullets: new Map(), montage: "", pos: null, dumped: false };
+const P_SIMPLE_EXE = "/PBZCombatAsset/ActorData/Players/Hun/Abilities/AHuaBlade/ExE/GA_SimpleExecution_GuiTouBlade.GA_SimpleExecution_GuiTouBlade_C";
+function tagsStr(c) { try { const out = []; const a = c.GameplayTags; for (let i = 0; i < a.Num(); i++) out.push(a.Get(i).TagName); return out.join(" ") || "-"; } catch (e) { try { return UE.BlueprintGameplayTagLibrary.GetDebugStringFromGameplayTagContainer(c); } catch (e2) { return "?"; } } }
+function dumpSimpleExecution() {
+    try {
+        const cls = UE.Class.Load(P_SIMPLE_EXE);
+        const cdo = cls && UE.SGameAIFunctionLibrary.GetClassDefaultObject(cls);
+        if (!cdo) { log("attr: GA_SimpleExecution_GuiTouBlade CDO not found"); return; }
+        const trig = [];
+        try { const a = cdo.AbilityTriggers; for (let i = 0; i < a.Num(); i++) { const x = a.Get(i); trig.push(`${x.TriggerTag.TagName}(source ${x.TriggerSource})`); } } catch (e) { trig.push("ERR " + e); }
+        log(`attr: GA_SimpleExecution_GuiTouBlade triggers [${trig.join(", ")}]`);
+        for (const k of ["AbilityTags", "ActivationRequiredTags", "ActivationBlockedTags", "SourceRequiredTags", "TargetRequiredTags", "TargetBlockedTags"])
+            { try { log(`attr: GA_SimpleExecution_GuiTouBlade ${k}: ${tagsStr(cdo[k])}`); } catch (e) { log(`attr: ${k} not readable: ${e}`); } }
+    } catch (e) { log("attr: dumping GA_SimpleExecution_GuiTouBlade failed: " + e); }
+}
+function attribution(pawn) {
+    const t = r1(now());
+    if (!attr2.dumped) { attr2.dumped = true; dumpSimpleExecution(); }
+    try {
+        const out = puerts.$ref(UE.NewArray(UE.Actor));
+        UE.GameplayStatics.GetAllActorsOfClass(gi, UE.BulletActorBase.StaticClass(), out);
+        const arr = puerts.$unref(out);
+        for (let i = 0; i < arr.Num(); i++) {
+            const b = arr.Get(i);
+            if (!valid(b) || b.BulletOwnerAvatar !== pawn) continue;
+            const key = nameOf(b), st = String(b.BulletStatus), bd = b.BulletData ? nameOf(b.BulletData) : "(no BD)";
+            const sig = st + "|" + bd;
+            if (attr2.bullets.get(key) === sig) continue;
+            attr2.bullets.set(key, sig);
+            const src = b.BulletSourceAbility ? nameOf(b.BulletSourceAbility.GetClass ? b.BulletSourceAbility.GetClass() : b.BulletSourceAbility) : "(none)";
+            log(`attr t=${t} bullet ${key.split("_C_").shift()} status ${st} BD ${bd} source ${src}`);
+        }
+    } catch (e) { logOnce("attr-b", "listing bullets failed: " + e); }
+    try {
+        const asc = UE.AbilitySystemBlueprintLibrary.GetAbilitySystemComponent(pawn);
+        const m = asc.GetCurrentMontage(), mn = m ? nameOf(m) : "(none)";
+        if (mn !== attr2.montage) { attr2.montage = mn; log(`attr t=${t} player montage ${mn}`); }
+    } catch (e) { logOnce("attr-m", "reading the player's montage failed: " + e); }
+    try {
+        const p = pawn.K2_GetActorLocation();
+        if (attr2.pos && Math.hypot(p.X - attr2.pos.X, p.Y - attr2.pos.Y) > 20) log(`attr t=${t} player moved ${r1(Math.hypot(p.X - attr2.pos.X, p.Y - attr2.pos.Y))} cm`);
+        attr2.pos = p;
+    } catch (e) { }
+}
+
 // ---- loop ----
 let timer, spawnedThisLoad = false, dumpedThisLoad = false, errors = 0;
 function tick() {
@@ -304,6 +352,7 @@ function tick() {
         if (!spawnedThisLoad && cfg.spawn.enabled) { spawnedThisLoad = true; spawnAll(pawn); }
         if (cfg.measure.enabled) measure(pawn);
         if (cfg.selftest.enabled) selftest(pawn);
+        if (cfg.selftest.enabled && cfg.selftest.attribution) attribution(pawn);
         guardDummies();
         errors = 0;
     } catch (e) {
