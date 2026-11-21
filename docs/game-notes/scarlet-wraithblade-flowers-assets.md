@@ -295,5 +295,23 @@ CDO：`CanUseSpecial=true`、**`SpecialCooldown=0.4`**、**`Max Flowers Default=
   - 盛放默认数值、300 cm 的一轮：两次自动爆炸后杀气都是 0.1 → 0.1，木桩最后被 UltraFlower 打空血死亡，同样没有处决。【已证实】
 - 结论：花不再破防，近处也不再触发角色自动处决。敌人仍会被花**打空血**而死（UltraFlower 每跳约 225，对小怪很致命，这是原版资产的数值）。【已证实】
 - `BP_Monster_FemaleDoll_QinNv` 作为木桩时，这一轮完全没有受到伤害（杀气、血量都没变），原因未查。【已观察】
-- **还没堵上的第三条路（待测）**：铸魂计数溢出 `GE_Weapon_GuiTouBlade_Evolution_HitCounter_Explode` 的命中组件是物理 2.0、杀气（AngerDamage）2.0、元素 2.0，计算器 `PBZPlayerNonLethal`（导出 `UpgradeData/GE_Weapon_GuiTouBlade_Evolution_HitCounter_Explode.json`）。每次自动爆炸都会给计数 +1，所以第 5 次（或玩家攒到 4 层后的下一次自动爆炸）溢出时很可能破防，进而触发近身自动处决。今天的几轮都在计数 1～2 时木桩就死了，没有测到。【已证实（导出字段）/ 推断（会破防）】
-- 未做 A/B：`CantBreakTarget`（`PBZNormal` 类）是否比原版 `PBZPlayerNonLethal` 更容易致死。按原计算器的名字推测，原版的彼岸·极可能打不死敌人，换成 `CantBreakTarget` 后就能打死了。【未知】
+**补测（15:08～15:13，木桩 `MaleThug_TwinAxe` HP 1360 / 杀气 660，AI 关，250 cm，`pinDummy`，`tickDamageScale` 0.17）**
+
+- **铸魂计数溢出不破防。** 第 5 次自动爆炸把计数推到 5，下一次自动爆炸触发溢出：−456.9（另一轮 −569）。杀气 0.1 → 2.5 后开始回升，没有破防、处决或角色位移。【已证实】
+  - 字段：`GE_Weapon_GuiTouBlade_Evolution_HitCounter_Explode` 是物理 2.0、杀气 2.0、元素 2.0，计算器 `PBZPlayerNonLethal`。【已证实（导出）】
+  - 在 Sword Thug（500 HP）上，溢出直接把剩余血量打空。【已观察】
+- **彼岸·极对照（原版 `PBZPlayerNonLethal` vs `CantBreakTarget`），两种都不破防，也都能打空血：**
+
+  | 计算器 | 掉血 | 打空 1360 血用时 | 杀气 |
+  |---|---|---|---|
+  | 原版 `PBZPlayerNonLethal` | −224.6，然后 −337 ×3 | 约 1.05 s | 第一击后开始**回升**（0.1 → 123.9） |
+  | `CantBreakTarget` | −224.6 ×3，然后 −303.3 ×2 | 约 1.1 s | 停在 0.1，直到死亡 |
+
+  【已证实】
+- **更正**：
+  - 前文“彼岸·极自带的 0.3 杀气伤害会破防”是推断，实测是错的。
+  - “UltraFlower −337 = −224.6 × 1.5 破防倍率”也是错的：−337 出现时杀气大于 0，目标没有破防，×1.5 另有来源（未查）。
+  - 真正会破防的只有**自动爆炸的杀气项**；`tickCantBreak` 堵上的就是这一条。`ultraCantBreak` 只决定杀气是停在 0.1 还是回升。【已证实】
+- `NonLethal` 这个名字不代表打不死：两种计算器都会把血量打到 0。【已证实】
+- **E 不受影响。** 自动爆炸之后按 E：直击 −217.1，灼烧 67.4 + 91 + 91，和原版一致。改在自动爆炸子弹模块上的计算器和伤害修正没有漏到 E 的子弹上。【已证实】
+- `BP_Monster_FemaleDoll_QinNv` 作为木桩时，这一轮完全没有受到伤害（杀气、血量都没变），原因未查。【已观察】

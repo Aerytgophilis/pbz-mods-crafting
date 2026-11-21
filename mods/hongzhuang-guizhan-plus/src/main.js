@@ -94,8 +94,8 @@ const BASE = {
     // DamageCalculator_CantBreakTarget (the vanilla flower Debuff_Tick's calculator: Shachi stops at 0.1). A flower that
     // truly breaks a small enemy near the player makes the player's GA_SimpleExecution_GuiTouBlade fire with no input
     // (game-notes §13), so both are on by default (user decision 2026-11-21); the break is left to the player's own hits.
-    tickCantBreak: true,      // automatic explosions
-    ultraCantBreak: true,     // 彼岸·极 (UltraFlower GE, vanilla calculator PBZPlayerNonLethal)
+    tickCantBreak: true,      // automatic explosions (their AngerDamage term is what broke enemies)
+    ultraCantBreak: true,     // 彼岸·极: hold Shachi at 0.1 instead of letting it recover (stock PBZPlayerNonLethal never breaks)
 };
 // [min, max, kind]. kind "tier": listed values are the supported tiers; others are allowed but warned about.
 const RANGE = {
@@ -650,8 +650,9 @@ function syncUltraTags(want) {
     }
 }
 
-// 彼岸·极 Shachi: the UltraFlower GE's hit component carries its own calculator (PBZPlayerNonLethal, which lets the 0.3
-// AngerDamage break). With ultraCantBreak we swap in CantBreakTarget on the class default; periodic executions read the
+// 彼岸·极 Shachi: the UltraFlower GE's hit component carries its own calculator (PBZPlayerNonLethal). Measured 2026-11-21:
+// it does not break either, but after each hit the enemy's Shachi starts to recover; CantBreakTarget holds it at 0.1 like
+// the flower Debuff_Tick, same HP damage (both kill). With ultraCantBreak we swap it in on the class default; periodic executions read the
 // definition each time, so it also covers effects already running. stop() puts the stock calculator back.
 function ultraHitComponent() {
     const cls = UE.Class.Load(P_ULTRA_GE);
@@ -667,12 +668,12 @@ function ultraHitComponent() {
 function setUltraCalc(cantBreak) {
     try {
         const c = ultraHitComponent();
-        if (!c) { logOnce("ucalc-miss", "UltraFlower hit component not found: 彼岸·极 Shachi stays vanilla (can break)"); return false; }
+        if (!c) { logOnce("ucalc-miss", "UltraFlower hit component not found: 彼岸·极 keeps the stock calculator"); return false; }
         if (shared.ultraCalcStock === undefined) shared.ultraCalcStock = c.CustomCalculator || null;
         let want = shared.ultraCalcStock;
         if (cantBreak) {
             want = UE.Object.Load(P_CALC_CANT_BREAK);
-            if (!valid(want)) { logOnce("calc-miss2", "DamageCalculator_CantBreakTarget not found: 彼岸·极 can break enemies"); return false; }
+            if (!valid(want)) { logOnce("calc-miss2", "DamageCalculator_CantBreakTarget not found: 彼岸·极 keeps the stock calculator"); return false; }
         }
         c.CustomCalculator = want;
         dbg(`UltraFlower calculator -> ${want ? pathOf(c.CustomCalculator).split(".").pop() : "(none)"}`);
