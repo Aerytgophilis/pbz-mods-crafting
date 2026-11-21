@@ -8,9 +8,9 @@
     "enabled": true,
     "class": "/PBZCombatAsset/ActorData/Mobs/003_MaleThug/BP_Monster_MaleThug_Sword_Blue.BP_Monster_MaleThug_Sword_Blue_C",
     "count": 1,
-    "distance": 150,
+    "distance": 400,
     "spacing": 300,
-    "dummy": true
+    "dummy": false
   },
   "dummyMinHealth": 0.05,
   "dump": {
@@ -23,9 +23,9 @@
     "count": 6,
     "ringRadius": 80,
     "eAt": 0,
-    "endAt": 15,
+    "endAt": 25,
     "noHitCounter": false,
-    "pinDummy": false,
+    "pinDummy": true,
     "centerFlower": true
   }
 }

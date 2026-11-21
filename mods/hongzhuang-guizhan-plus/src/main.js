@@ -17,7 +17,7 @@
 "use strict";
 
 const MOD = "hongzhuang-guizhan-plus";
-const VERSION = "0.1.0-dev.2";
+const VERSION = "0.1.0-dev.3";
 const UE = require("ue");
 const puerts = require("puerts");
 
@@ -55,17 +55,22 @@ const K = {
     tickShachiBig: 0.5,
     ultimateTickFactor: 0.5,  // 断情: interval x this
     // Damage of an automatic explosion = tickDamageScale x (hit + burn) of a normal one. Measured 2026-11-21 (Lv30, Sword
-    // Thug): hit 149.7, burn (GE_Hun_GuiTouBlade_Explode) 67.4 + 91 + 91 = 249.4, so the burn is ~62.5% of the total.
-    // Automatic explosions drop the burn and scale the hit by tickDamageScale / (1 - burnShare).
-    tickBurn: false,          // keep the after-hit burn GE on automatic explosions
-    burnShare: 0.625,
+    // Thug, not broken): hit 149.7, burn (GE_Hun_GuiTouBlade_Explode) 67.4 + 91 + 91 = 249.4; total 399.1.
+    // Automatic explosions keep the burn's first tick (it lands with the hit) and then remove the burn from the enemies
+    // they hit; the hit is scaled so that hit + first tick = tickDamageScale x total:
+    //   hit multiplier = (tickDamageScale - firstBurnShare) / hitShare, at least 0.
+    // (Blanking the burn GE on the shared BD instead made broken enemies lose all HP ~0.4 s later: 4 of 4 runs.)
+    tickBurn: false,          // true: automatic explosions keep the whole burn and scale only the hit by tickDamageScale
+    hitShare: 0.375,          // 149.7 / 399.1
+    firstBurnShare: 0.169,    // 67.4 / 399.1
+    burnStripDelay: 0.1,      // game seconds after an automatic explosion before its burn is removed
     // true: automatic explosions use DamageCalculator_CantBreakTarget (like the vanilla flower Debuff_Tick, which stops
     // Shachi at 0.1). Off by default (user decision 2026-11-21): automatic explosions break Shachi like a normal hit.
     tickCantBreak: false,
-    burnRestoreDelay: 0.15,   // when tickBurn is false: the burn GE stays blank this long after an automatic explosion
-    remainGuard: 0.3,
+    remainGuard: 0.3,         // no auto explosion this close to expiry (the expiry explosion follows)
     forceLevel: 0,            // probe only: pretend this weapon level (0 = real level)
-    forceDuanqing: false,     // probe only: pretend 断情 is always on         // no auto explosion this close to expiry (the expiry explosion follows)
+    forceDuanqing: false,     // probe only: pretend 断情 is always on
+    shachiFirstTickOnly: false, // probe only: the Shachi term only on a flower's first automatic explosion
     maxTickSounds: 4,         // per auto explosion batch
     maxTickParticles: 16,
 };
@@ -173,15 +178,8 @@ shared.recs = new Map();                         // flower path -> record
 shared.passives = shared.passives || new Set();  // passive instances whose SpecialCooldown we set
 shared.ultraTagged = new Map();                  // actor path -> actor carrying our UltraFlower loose tag
 shared.bdRadius = shared.bdRadius || new Map();
-shared.pendingRestore = shared.pendingRestore || [];      // burn GEs to put back on the BD events (see explodeKeep)
-function restoreBurns(all) {
-    const t = all ? Infinity : now();
-    shared.pendingRestore = shared.pendingRestore.filter((p) => {
-        if (p.at > t) return true;
-        for (const [ev, ge] of p.list) { try { ev.GameplayEffect = ge; } catch (e) { log("RESTORE of the burn GE failed: " + e); } }
-        return false;
-    });
-}  // BD path -> stock radius (restored on stop)
+// BD path -> stock radius (restored on stop)
+shared.pendingStrip = [];                        // automatic explosions whose burn is still to be removed (see stripBurns)
 const once = new Set();
 const logOnce = (k, m) => { if (!once.has(k)) { once.add(k); log(m); } };
 const dbg = (m) => { if (cfg.debugLog) log(m); };
@@ -436,20 +434,9 @@ function explodeKeep(passive, flowers, why, tick) {
         // Particles are blanked (and replayed for a spread subset) only above the per-batch cap.
         const blank = !tick ? [] : ["Explosion Sound"].concat(g.ts.length > K.maxTickParticles ? ["Explosion Particle"] : [], cfg.tickShake ? [] : ["Explosion Shake", "Explosion Force Feedback"]);
         for (const fld of blank) { try { saved[fld] = g.bd[fld]; g.bd[fld] = null; } catch (e) { logOnce("blank-" + fld, `could not blank ${fld}: ${e}`); } }
-        const burnSaved = [];
-        if (tick && !K.tickBurn) {
-            try {
-                const evs = g.bd.PreAttackEvents.Events;
-                for (let i = 0; i < evs.Num(); i++) { const ev = evs.Get(i); if (valid(ev) && "GameplayEffect" in ev && ev.GameplayEffect) { burnSaved.push([ev, ev.GameplayEffect]); ev.GameplayEffect = null; } }
-                logOnce("burn-off", `auto explosions: after-hit burn GE blanked on ${burnSaved.length} event(s) around Start()`);
-            } catch (e) { logOnce("burn-err", "could not blank the burn GE: " + e); }
-        }
         try { b.Start(); }
-        finally {
-            for (const fld of Object.keys(saved)) { try { g.bd[fld] = saved[fld]; } catch (e) { log(`RESTORE of ${fld} failed: ${e}`); } }
-            // The hit reads the burn GE after Start() (next frame or so): restore it a little later (game time).
-            if (burnSaved.length) shared.pendingRestore.push({ at: now() + K.burnRestoreDelay, list: burnSaved });
-        }
+        finally { for (const fld of Object.keys(saved)) { try { g.bd[fld] = saved[fld]; } catch (e) { log(`RESTORE of ${fld} failed: ${e}`); } } }
+        if (tick && !K.tickBurn) queueBurnStrip(g.bd, g.ts);
         if (tick) {
             if ("Explosion Particle" in saved) playParticles(saved["Explosion Particle"], pickSpread(g.ts, K.maxTickParticles));
             playSounds(saved["Explosion Sound"], g.ts, cfg.tickVolume);
@@ -457,6 +444,42 @@ function explodeKeep(passive, flowers, why, tick) {
         started++;
     }
     return started;
+}
+
+// The burn GE an explosion BD applies on hit (read only: the BD is never changed for this).
+function burnClassOf(bd) {
+    try {
+        const evs = bd.PreAttackEvents.Events;
+        for (let i = 0; i < evs.Num(); i++) { const ev = evs.Get(i); if (valid(ev) && ev.GameplayEffect) return ev.GameplayEffect; }
+    } catch (e) { logOnce("burn-cls", "reading the burn GE of the explosion BD failed: " + e); }
+    return null;
+}
+function queueBurnStrip(bd, ts) {
+    const ge = burnClassOf(bd);
+    if (!ge) return;
+    let r = 120; try { r = bd.ColliderData.Radius; } catch (e) { }
+    shared.pendingStrip.push({ at: now() + K.burnStripDelay, ge, r, ps: ts.map((t) => locRot(t)[0]) });
+}
+// Remove one stack of the burn from each enemy the automatic explosion could have hit. Stacks from other sources
+// (an E explosion in the same instant) are the same GE, so at most one stack per automatic explosion is taken.
+function stripBurns(pawn) {
+    const t = now();
+    if (!shared.pendingStrip.some((p) => p.at <= t)) return;
+    const npcs = nearbyNpcs(pawn);
+    let pasc = null; try { pasc = UE.AbilitySystemBlueprintLibrary.GetAbilitySystemComponent(pawn); } catch (e) { }
+    shared.pendingStrip = shared.pendingStrip.filter((p) => {
+        if (p.at > t) return true;
+        let n = 0;
+        for (const e of npcs) {
+            if (!p.ps.some((q) => Math.hypot(e.p.X - q.X, e.p.Y - q.Y) < p.r + e.r + 50 && Math.abs(e.p.Z - q.Z) < 300)) continue;
+            try {
+                const asc = UE.AbilitySystemBlueprintLibrary.GetAbilitySystemComponent(e.a);
+                if (valid(asc)) { asc.RemoveActiveGameplayEffectBySourceEffect(p.ge, pasc, 1); n++; }
+            } catch (err) { logOnce("strip-err", "removing the burn failed (automatic explosions keep it): " + err); }
+        }
+        if (n) dbg(`burn removed from ${n} enemy(s)`);
+        return false;
+    });
 }
 
 // ======================================================================= area (flower size, explosion radius, ring spread)
@@ -580,8 +603,8 @@ function tickFlowers(pawn) {
         for (const { p, recs } of byPassive.values()) {
             const map = new Map(recs.map((r) => [r.f, r]));
             const n = explodeKeep(p, recs.map((r) => r.f), "tick", {
-                dmg: K.tickBurn ? cfg.tickDamageScale : cfg.tickDamageScale / (1 - K.burnShare),
-                shachi: (f) => { const r = map.get(f); return (r.big ? K.tickShachiBig : K.tickShachiSmall) * (r.early ? K.earlyShachiScale : 1); },
+                dmg: K.tickBurn ? cfg.tickDamageScale : Math.max(0, (cfg.tickDamageScale - K.firstBurnShare) / K.hitShare),
+                shachi: (f) => { const r = map.get(f); if (K.shachiFirstTickOnly && r.ticks > 0) return 0; return (r.big ? K.tickShachiBig : K.tickShachiSmall) * (r.early ? K.earlyShachiScale : 1); },
             });
             for (const r of recs) {
                 const iv = r.early ? K.tickIntervalEarly : cfg.tickInterval * (w.duanqing ? K.ultimateTickFactor : 1);
@@ -693,10 +716,10 @@ function tick() {
     try {
         const pawn = player();
         if (!valid(pawn)) return; // title screen / loading
-        restoreBurns(false);
         ensureMixin();
         if (!shared.cdoSet) shared.cdoSet = setCdoCooldown(cfg.manualCooldown);
         tickFlowers(pawn);
+        stripBurns(pawn);
         errors = 0;
     } catch (e) {
         log("tick threw: " + (e && e.stack || e));
@@ -717,7 +740,7 @@ shared.stop = () => {
     for (const key of [...shared.recs.keys()]) dropRec(key);
     syncUltraTags(new Map());
     restoreBdRadius();
-    restoreBurns(true);
+    shared.pendingStrip = [];
     setCdoCooldown(STOCK_COOLDOWN);
     shared.cdoSet = false;
     for (const p of shared.passives) { try { if (valid(p)) p.SpecialCooldown = STOCK_COOLDOWN; } catch (e) { } }
