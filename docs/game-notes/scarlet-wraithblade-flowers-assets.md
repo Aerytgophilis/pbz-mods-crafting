@@ -247,4 +247,25 @@ CDO：`CanUseSpecial=true`、**`SpecialCooldown=0.4`**、**`Max Flowers Default=
 - `config.json` 由 mod 自己读文件（`EasyCsv.LoadStringFromLocalFile`），带 `//`、`/* */` 注释和尾逗号都能解析，中文预设名正常。【已证实】
 - `PBZSoundFXSubsystem.PBZPostEventAtLocation` 返回的 AkComponent 上 `SetOutputBusVolume(0.25)` 调用成功；实际听感待用户确认。【已证实（调用）/ 待核对（听感）】
 - puerts 的 `TMap` 没有 `Keys()`，用 `GetMaxIndex` / `IsValidIndex` / `GetKey` 遍历。
-- 生生不息、安全上限、彼岸·极的伤害、断情增幅、面积档位：本节写成时还没测完。
+
+**后续实测（同日，院子平地，mod 0.1.0-dev.2）**
+
+| 项 | 结果 | 状态 |
+|---|---|---|
+| 花的父类 `BP_PBZ_ProjectileEmitter` 的 `Lifetime Timer` | 花刚生成时剩余 **29.94 s**（即 `MyData.Lifetime` ≈ 30 s，推翻 §1 “类默认值为 0”的推断）。到时直接 `Deactivate`，**不爆炸**。不处理的话，60 s 档和 Lv30 生生不息都会在 30 s 被静默掐掉。mod 把它和 `Explode Timer` 一起暂停 / 恢复 | 已证实 |
+| 生生不息 Lv30（木桩钉在花里） | 7 朵花一直活到 30 s 安全上限，再由 mod 调 `Expire Explode` 按原版爆炸消失 | 已证实 |
+| 生生不息 Lv15（探针把等级当 15） | 延长 10.04 s 后恢复计时，15 + 10 = 25 s 到期 | 已证实（逻辑） |
+| 花自己的 `Overlapping Actors` | 敌人还站在花里时会把它丢掉（约 2.5 s 后）。mod 改用距离判断（花的碰撞半径：小花 100，×√(1+p)） | 已证实 |
+| 自动爆炸让敌人后仰 | 木桩每次被自动爆炸推出花外（用户在游戏里也观察到）。**保持原样**（用户 2026-11-21：实战中敌人和主角都会动，没关系） | 已证实 |
+| 断情增幅（探针强制断情） | 间隔 4 s → 2 s | 已证实（逻辑）；断情标签名待用户在游戏里核对 |
+| 面积 +80% | 爆炸半径 120 → 161、500 → 670.8；小花碰撞半径 100 → 134.2；一圈 6 朵半径 200 → 268.3 | 已证实 |
+| 花海伤害 0.5 | 直击 −199.7（预期 149.7 × 0.5 ÷ 0.375 = 199.6） | 已证实 |
+| 彼岸·极 | 2 次自动爆炸后变“极”，敌人得到 `InDebuffArea.UltraFlower` 标签，原版 UltraFlower 效果打出一次约 −300；挂上大花的循环特效 `NS_GuiTouBlade_Flower_301_Loop` | 已证实 |
+| 用户实战中的一次铺花 | 14 朵花几乎同时出现（推断是同一招的内外两圈 6 + 8），旧的“必须是一个圆”的判定没有铺开它；已改成同一瞬间 5 朵以上就整体按中心放大 | 已证实（日志）/ 推断（同心圆） |
+
+**破防与自动处决**（子代理调查 `.agent-runs/shachi-break-investigation.md` + 自测）：
+- 花丛减益 `Debuff_Tick` 用 `DamageCalculator_CantBreakTarget`，杀气只削到 **0.1**，不会让敌人真正破防。**§12 的“木桩已破防”应更正为“杀气 0.1，未真正破防”**，那次 −293 是对未破防目标的数值。【已证实（日志）/ 推断（计算器规则，类默认值未导出）】
+- 灼烧、UltraFlower、铸魂计数爆发用 `DamageCalculator_PBZPlayerNonLethal`（处决系统前几段用的非致死计算器）。【推断】
+- 资产里有独立的破防参数（`PDA_GlobalCombatConfig` 的 `Mob Break Duration`、`Mob Break Damage Multiplier` 等，属性 `TakenAdditiveMultiplier_BreakDamage`），没有“杀气为 0 即死”的规则；11-20 的日志里真实敌人杀气到 0 后没死、杀气回升。【已证实（反射）/ 未导出（数值）】
+- 自测（3 次，木桩 AI 关闭、杀气 0.1）：自动爆炸带杀气项把最后 0.1 打掉 → 0.5 s 内角色在无输入的情况下移动、做出处决动作 → 木桩 HP 归零 → 约 1 s 后出现一圈 6 朵小花（`GA_SimpleExecution_GuiTouBlade` 的单体时间轴正是铺 6 朵）。杀气项为 0 时不发生。**推断：玩家的命中让普通敌人真正破防时，原版会自动触发简易处决**；用户 11-20 的“一刀砍死持枪鬼差”（160 杀气一次打空）推断是同一机制。触发处决的事件没有导出。【推断】
+- 对 mod 的含义：自动爆炸带杀气项时，会替玩家打出“破防一击”，让角色在玩家没有操作时自己冲去处决花里的小怪。是否保留由用户决定（`tickCantBreak` 默认关，用户 2026-11-21 要求不要擅自打开）。

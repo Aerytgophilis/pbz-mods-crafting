@@ -31,7 +31,7 @@ const DEFAULTS = {
              count: 1, distance: 500, spacing: 300, dummy: true },
     dummyMinHealth: 0.25,
     dump: { enabled: false, weaponFilter: "" },
-    selftest: { enabled: false, flowersAt: 1.5, count: 6, ringRadius: 60, eAt: 10, endAt: 20, noHitCounter: false, pinDummy: false },
+    selftest: { enabled: false, flowersAt: 1.5, count: 6, ringRadius: 60, eAt: 10, endAt: 20, noHitCounter: false, pinDummy: false, centerFlower: true },
 };
 let cfg = DEFAULTS;
 try {
@@ -96,7 +96,11 @@ function extraState(npc) {
         if (!tagInDebuff) tagInDebuff = UE.PBZBlueprintFunctionLibrary.ConvertStringToGameplayTag("CharacterState.AbilityState.GuiTouBlade.InDebuff");
         const cls = UE.Class.Load(P_HITCOUNTER);
         const n = cls ? asc.GetGameplayEffectCount(cls, null, true) : "?";
-        return `, InDebuff ${asc.HasMatchingGameplayTag(tagInDebuff)}, hit counter ${n}`;
+        const has = (a, t) => { try { return a.HasMatchingGameplayTag(UE.PBZBlueprintFunctionLibrary.ConvertStringToGameplayTag(t)); } catch (e) { return "?"; } };
+        const pl = player(), pasc = UE.AbilitySystemBlueprintLibrary.GetAbilitySystemComponent(pl);
+        const pp = pl.K2_GetActorLocation(), np = npc.K2_GetActorLocation();
+        return `, InDebuff ${asc.HasMatchingGameplayTag(tagInDebuff)}, hit counter ${n}; npc Executing ${has(asc, "CharacterState.HitReact.State.Executing")} Dead ${has(asc, "CharacterState.Dead")}`
+            + `; player Execution ${has(pasc, "Ability.Action.Execution")} at ${r1(Math.hypot(pp.X - np.X, pp.Y - np.Y))} cm`;
     } catch (e) { logOnce("extra-err", "reading debuff / hit counter failed: " + e); return ""; }
 }
 function stripHitCounter(npc) {
@@ -245,7 +249,8 @@ function selftest(pawn) {
             // needs the passive as source ability. The passive registers each new flower (SpawnFlower event) and writes
             // itself into the flower's "Passive Ability": the first flower (centre, i = count) tells us the passive.
             let passive = null;
-            for (const i of [s.count, ...Array.from({ length: s.count }, (_, k) => k)]) {
+            const order = s.centerFlower ? [s.count, ...Array.from({ length: s.count }, (_, k) => k)] : Array.from({ length: s.count }, (_, k) => k);
+            for (const i of order) {
                 const a = 2 * Math.PI * i / s.count, rr = i === s.count ? 0 : s.ringRadius;
                 const tr = UE.KismetMathLibrary.MakeTransform(new UE.Vector(c.X + Math.cos(a) * rr, c.Y + Math.sin(a) * rr, c.Z), new UE.Rotator(), new UE.Vector(1, 1, 1));
                 const b = bd.CreateBullet(tr, pawn);

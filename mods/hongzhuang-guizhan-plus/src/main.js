@@ -479,8 +479,7 @@ function scaleFlower(f, k) {
     try { f.SetActorScale3D(new UE.Vector(k, k, k)); return true; } catch (e) { logOnce("scale-err", "SetActorScale3D on a flower failed: " + e); return false; }
 }
 // A ring is spawned over ~0.1-0.4 s. New flowers wait in `pendingRing` until no new flower came for 0.25 s; a group of
-// 5+ that sits on a circle (radius spread < 25% of the mean) is pushed out from its centre by k. Lines and single
-// flowers (FlowerWalk, big flowers) are left where they are.
+// 5+ is pushed out from its centre by k. Single flowers (FlowerWalk, big flowers) are left where they are.
 let pendingRing = [], pendingAt = 0;
 function spreadRings(t, k) {
     if (!pendingRing.length || t - pendingAt < 0.25) return;
@@ -490,13 +489,14 @@ function spreadRings(t, k) {
     const cx = ps.reduce((s, p) => s + p.X, 0) / ps.length, cy = ps.reduce((s, p) => s + p.Y, 0) / ps.length;
     const ds = ps.map((p) => Math.hypot(p.X - cx, p.Y - cy)), mean = ds.reduce((s, d) => s + d, 0) / ds.length;
     const sd = Math.sqrt(ds.reduce((s, d) => s + (d - mean) * (d - mean), 0) / ds.length);
-    if (mean < 50 || sd > 0.25 * mean) { dbg(`not a ring (${g.length} flowers, radius ${r2(mean)} +- ${r2(sd)}): left in place`); return; }
+    // Any burst of 5+ flowers is spread about its centre: one ring, or concentric rings (e.g. 6 + 8 in the same move).
+    if (mean < 50) { dbg(`burst of ${g.length} flowers too tight (radius ${r2(mean)}): left in place`); return; }
     for (let i = 0; i < g.length; i++) {
         const p = ps[i];
         try { g[i].f.K2_SetActorLocation(new UE.Vector(cx + (p.X - cx) * k, cy + (p.Y - cy) * k, p.Z), false, puerts.$ref(new UE.HitResult()), true); }
         catch (e) { logOnce("move-err", "moving a flower failed: " + e); return; }
     }
-    dbg(`ring of ${g.length} spread: radius ${r2(mean)} -> ${r2(mean * k)}`);
+    dbg(`burst of ${g.length} spread: mean radius ${r2(mean)} (+- ${r2(sd)}) -> ${r2(mean * k)}`);
 }
 
 // ======================================================================= main tick

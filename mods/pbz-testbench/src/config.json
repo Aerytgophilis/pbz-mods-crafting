@@ -23,8 +23,9 @@
     "count": 6,
     "ringRadius": 80,
     "eAt": 0,
-    "endAt": 20,
+    "endAt": 15,
     "noHitCounter": false,
-    "pinDummy": true
+    "pinDummy": false,
+    "centerFlower": true
   }
 }
