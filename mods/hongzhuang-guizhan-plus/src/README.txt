@@ -1,4 +1,4 @@
-红妆鬼斩增强 Scarlet Wraithblade Plus  v0.1.0
+红妆鬼斩增强 Scarlet Wraithblade Plus  v0.1.1
 《影之刃零》Phantom Blade Zero — Steam build 26367565
 MIT License. https://github.com/Aerytgophilis/pbz-mods-crafting
 
@@ -11,7 +11,7 @@ MIT License. https://github.com/Aerytgophilis/pbz-mods-crafting
      Extract the zip into the game folder (the one that contains ProjectPBZ).
      文件会落在 ProjectPBZ\PBZModLoader\mods\hongzhuang-guizhan-plus\
   3. 进游戏。ProjectPBZ\PBZModLoader\loader.log 里出现
-     "[hongzhuang-guizhan-plus] 0.1.0 started" 就是装好了。
+     "[hongzhuang-guizhan-plus] 0.1.1 started" 就是装好了。
 
 设置 / Settings
   改 config.json，然后在游戏里按 Alt+F5。

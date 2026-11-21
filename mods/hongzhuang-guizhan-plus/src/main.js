@@ -17,7 +17,7 @@
 "use strict";
 
 const MOD = "hongzhuang-guizhan-plus";
-const VERSION = "0.1.0";
+const VERSION = "0.1.1";
 const UE = require("ue");
 const puerts = require("puerts");
 
@@ -184,6 +184,7 @@ shared.ultraTagged = new Map();                  // actor path -> actor carrying
 shared.bdRadius = shared.bdRadius || new Map();
 // BD path -> stock radius (restored on stop)
 shared.pendingStrip = [];                        // automatic explosions whose burn is still to be removed (see stripBurns)
+shared.quietAk = new Map();                      // pooled AkComponent -> game time we turned it down (see restoreAk)
 const once = new Set();
 const logOnce = (k, m) => { if (!once.has(k)) { once.add(k); log(m); } };
 const dbg = (m) => { if (cfg.debugLog) log(m); };
@@ -381,7 +382,9 @@ function playSounds(ev, ts, volume) {
             sfx.PBZPostEventAtLocation(ev, l, comp, undefined, r, 0, 1.0);
             const c = puerts.$unref(comp);
             if (valid(c) && volume < 1) {
-                try { c.SetOutputBusVolume(volume); logOnce("vol-ok", `auto explosion sound posted, SetOutputBusVolume(${volume}) ok`); }
+                // The component comes from PBZSoundFXSubsystem's pool: give it back at full volume (restoreAk), or the
+                // next sound that reuses it (dialogue, SFX) plays at our volume (0.1.0 bug, 2026-11-21).
+                try { c.SetOutputBusVolume(volume); shared.quietAk.set(c, lastT); logOnce("vol-ok", `auto explosion sound posted, SetOutputBusVolume(${volume}) ok`); }
                 catch (e) { logOnce("vol-err", "SetOutputBusVolume failed (sound at full volume): " + e); }
             } else if (!valid(c)) logOnce("vol-nocomp", "PBZPostEventAtLocation gave no AkComponent: volume not applied");
         } catch (e) {
@@ -389,6 +392,36 @@ function playSounds(ev, ts, volume) {
             try { sfx.SpawnAudioUniversal(ev, player(), "None", t, false, false, 0, 0); } catch (e2) { logOnce("spawnaudio-err", "SpawnAudioUniversal failed: " + e2); }
         }
     }
+}
+// Pooled AkComponents we turned down go back to full volume as soon as the pool has them back (UnusedAkComponents),
+// or after AK_RESTORE_AFTER game seconds at the latest.
+const AK_RESTORE_AFTER = 4;
+function arrHas(arr, o) {
+    try { const k = pathOf(o); for (let i = 0; i < arr.Num(); i++) { const x = arr.Get(i); if (x === o || (x && pathOf(x) === k)) return true; } } catch (e) { }
+    return false;
+}
+function restoreAk(t, all) {
+    if (!shared.quietAk.size) return;
+    const unused = valid(sfx) ? sfx.UnusedAkComponents : null;
+    for (const [c, at] of [...shared.quietAk]) {
+        if (!valid(c)) { shared.quietAk.delete(c); continue; }
+        if (all || t - at >= AK_RESTORE_AFTER || (unused && arrHas(unused, c))) {
+            try { c.SetOutputBusVolume(1.0); } catch (e) { }
+            shared.quietAk.delete(c);
+            dbg(`AkComponent back to full volume after ${r2(t - at)} s (${all ? "stop" : t - at >= AK_RESTORE_AFTER ? "timeout" : "returned to pool"})`);
+        }
+    }
+}
+// Repair for 0.1.0: put every pooled AkComponent back to full volume once per load (the pool never resets it itself).
+function resetAkPool() {
+    try { if (!valid(sfx)) sfx = UE.SubsystemBlueprintLibrary.GetWorldSubsystem(player(), UE.PBZSoundFXSubsystem.StaticClass()); } catch (e) { }
+    if (!valid(sfx)) return false;
+    let n = 0;
+    for (const arr of [sfx.UnusedAkComponents, sfx.UsedAkComponents]) {
+        try { for (let i = 0; i < arr.Num(); i++) { const c = arr.Get(i); if (valid(c)) { c.SetOutputBusVolume(1.0); n++; } } } catch (e) { logOnce("akreset-err", "AkComponent pool reset failed: " + e); }
+    }
+    log(`sound pool: ${n} AkComponent(s) set back to full volume`);
+    return true;
 }
 function locRot(t) {
     try { const l = puerts.$ref(new UE.Vector()), r = puerts.$ref(new UE.Rotator()), sc = puerts.$ref(new UE.Vector()); UE.KismetMathLibrary.BreakTransform(t, l, r, sc); return [puerts.$unref(l), puerts.$unref(r), puerts.$unref(sc)]; }
@@ -756,6 +789,8 @@ function tick() {
         if (!shared.ultraCalcSet) shared.ultraCalcSet = setUltraCalc(cfg.ultraCantBreak) || once.has("ucalc-miss") || once.has("ucalc-err") || once.has("calc-miss2");
         tickFlowers(pawn);
         stripBurns(pawn);
+        if (lastT !== null) restoreAk(lastT, false);
+        if (!shared.akReset) shared.akReset = resetAkPool();
         errors = 0;
     } catch (e) {
         log("tick threw: " + (e && e.stack || e));
@@ -777,6 +812,8 @@ shared.stop = () => {
     syncUltraTags(new Map());
     restoreBdRadius();
     shared.pendingStrip = [];
+    restoreAk(0, true);
+    shared.akReset = false;
     setCdoCooldown(STOCK_COOLDOWN);
     shared.cdoSet = false;
     if (shared.ultraCalcStock !== undefined) setUltraCalc(false);
