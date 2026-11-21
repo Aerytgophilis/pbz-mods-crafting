@@ -20,3 +20,4 @@
 | 2026-11-21 15:01–15:04 | agent 用 computer use 自测“花只削到 0.1”：重新部署 `pbz-testbench`（临时改木桩种类和距离）和 `hongzhuang-guizhan-plus`（临时改 `tickDamageScale` / `ultraAfterTicks`）3 轮。最后部署的是 0.1.0 的发布配置（盛放，`debugLog` 关），testbench 恢复原配置 | 不需要备份 | agent（用户授权 computer use） |
 | 2026-11-21 15:05 | 自测铸魂计数溢出：临时部署 `hongzhuang-guizhan-plus`（彼岸·极关、间隔 1.5 s、`tickDamageScale` 0.17）和 `pbz-testbench`（250 cm、`dummyMinHealth` 0）。重载后角色自己移动并在花出现前一击打死木桩（疑似有人在操作），测试中止，两个配置都恢复成发布版并重新部署 | 不需要备份 | agent（用户授权 computer use） |
 | 2026-11-21 15:07–15:14 | agent 用 computer use 补测铸魂溢出、彼岸·极计算器对照、E 不受影响：重新部署 `pbz-testbench`（木桩换 TwinAxe、250 cm、`pinDummy`、`dummyMinHealth` 0、`eAt` 6）和 `hongzhuang-guizhan-plus`（临时测试配置）6 轮。最后两个都恢复成发布配置并重新部署 | 不需要备份 | agent（用户授权 computer use） |
+| 2026-11-21 15:16 | 阳性对照：部署 `hongzhuang-guizhan-plus`（`tickCantBreak` false、彼岸·极关、`tickDamageScale` 0.17）和 `pbz-testbench`（TwinAxe、250 cm、`pinDummy`）。用户中途叫停。**游戏目录里现在仍是这份测试配置**，等用户同意后再部署发布配置 | 不需要备份 | agent（用户授权 computer use） |

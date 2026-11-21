@@ -95,7 +95,7 @@ const BASE = {
     // truly breaks a small enemy near the player makes the player's GA_SimpleExecution_GuiTouBlade fire with no input
     // (game-notes §13), so both are on by default (user decision 2026-11-21); the break is left to the player's own hits.
     tickCantBreak: true,      // automatic explosions (their AngerDamage term is what broke enemies)
-    ultraCantBreak: true,     // 彼岸·极: hold Shachi at 0.1 instead of letting it recover (stock PBZPlayerNonLethal never breaks)
+    ultraCantBreak: true,     // 彼岸·极 (stock calculator PBZPlayerNonLethal breaks)
 };
 // [min, max, kind]. kind "tier": listed values are the supported tiers; others are allowed but warned about.
 const RANGE = {
@@ -651,8 +651,8 @@ function syncUltraTags(want) {
 }
 
 // 彼岸·极 Shachi: the UltraFlower GE's hit component carries its own calculator (PBZPlayerNonLethal). Measured 2026-11-21:
-// it does not break either, but after each hit the enemy's Shachi starts to recover; CantBreakTarget holds it at 0.1 like
-// the flower Debuff_Tick, same HP damage (both kill). With ultraCantBreak we swap it in on the class default; periodic executions read the
+// with it the enemy shows the break signature (Shachi refills from 0.1, later hits x1.5); CantBreakTarget holds Shachi at
+// 0.1 like the flower Debuff_Tick, same HP damage (both kill). With ultraCantBreak we swap it in on the class default; periodic executions read the
 // definition each time, so it also covers effects already running. stop() puts the stock calculator back.
 function ultraHitComponent() {
     const cls = UE.Class.Load(P_ULTRA_GE);
