@@ -22,3 +22,4 @@
 | 2026-11-21 15:07–15:14 | agent 用 computer use 补测铸魂溢出、彼岸·极计算器对照、E 不受影响：重新部署 `pbz-testbench`（木桩换 TwinAxe、250 cm、`pinDummy`、`dummyMinHealth` 0、`eAt` 6）和 `hongzhuang-guizhan-plus`（临时测试配置）6 轮。最后两个都恢复成发布配置并重新部署 | 不需要备份 | agent（用户授权 computer use） |
 | 2026-11-21 15:16 | 阳性对照：部署 `hongzhuang-guizhan-plus`（`tickCantBreak` false、彼岸·极关、`tickDamageScale` 0.17）和 `pbz-testbench`（TwinAxe、250 cm、`pinDummy`）。用户中途叫停。**游戏目录里现在仍是这份测试配置**，等用户同意后再部署发布配置 | 不需要备份 | agent（用户授权 computer use） |
 | 2026-11-21 15:20 | 用户同意后部署发布版 `hongzhuang-guizhan-plus` 0.1.0（盛放，`debugLog` 关），并用 `deploy-mod.ps1 -Remove` 删掉 `mods\pbz-testbench\`（本地源码保留，以后测试再部署）。游戏前台是用户的 Chrome，没有按 Alt+F5：游戏内存里仍是测试配置，用户下次按 Alt+F5 或重开游戏后生效 | 不需要备份 | agent（用户批准） |
+| 2026-11-21 15:27 | 重新部署 `hongzhuang-guizhan-plus` 0.1.0：只改了 `main.js` 的一条注释，和仓库 HEAD 一致。等用户按 Alt+F5 生效 | 不需要备份 | agent |
