@@ -293,7 +293,7 @@ CDO：`CanUseSpecial=true`、**`SpecialCooldown=0.4`**、**`Max Flowers Default=
   - 再一跳 −207.6，血量归零死亡，杀气仍为 0.1。
   - 全程 `player Execution false`，没有来源为 `GA_SimpleExecution_GuiTouBlade` 的子弹，角色没有位移。
   - 盛放默认数值、300 cm 的一轮：两次自动爆炸后杀气都是 0.1 → 0.1，木桩最后被 UltraFlower 打空血死亡，同样没有处决。【已证实】
-- 结论：花不再破防，近处也不再触发角色自动处决。敌人仍会被花**打空血**而死（UltraFlower 每跳约 225，对小怪很致命，这是原版资产的数值）。【已证实】
+- 结论：**自动爆炸和彼岸·极**不再破防，这几轮里近处也没有再触发角色自动处决。铸魂计数溢出仍有破防迹象，见下方补测。敌人仍会被花**打空血**而死（UltraFlower 每跳约 225，对小怪很致命）。【已证实】
 - `BP_Monster_FemaleDoll_QinNv` 作为木桩时，这一轮完全没有受到伤害（杀气、血量都没变），原因未查。【已观察】
 **补测（15:08～15:17，木桩 `MaleThug_TwinAxe` HP 1360 / 杀气 660，AI 关，250 cm，`pinDummy`，`tickDamageScale` 0.17）**
 
