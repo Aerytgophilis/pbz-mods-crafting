@@ -31,7 +31,7 @@ const DEFAULTS = {
              count: 1, distance: 500, spacing: 300, dummy: true },
     dummyMinHealth: 0.25,
     dump: { enabled: false, weaponFilter: "" },
-    selftest: { enabled: false, flowersAt: 1.5, count: 6, ringRadius: 60, eAt: 10, endAt: 20, noHitCounter: false },
+    selftest: { enabled: false, flowersAt: 1.5, count: 6, ringRadius: 60, eAt: 10, endAt: 20, noHitCounter: false, pinDummy: false },
 };
 let cfg = DEFAULTS;
 try {
@@ -233,7 +233,9 @@ function selftest(pawn) {
     try { hp = attr(d.pawn, "Health"); } catch (e) { }
     if (hp !== null && st.lastHp !== null && hp < st.lastHp) st.drops.push({ at: r1(rel), d: r1(hp - st.lastHp), afterE: st.steps.has("E") });
     if (hp !== null) st.lastHp = hp;
-    if (s.noHitCounter) stripHitCounter(d.pawn);   // keep the Lv30 hit-counter burst from killing the dummy
+    if (s.noHitCounter) stripHitCounter(d.pawn);
+    // `pinDummy`: explosions stagger the dummy out of the flowers; put it back every poll (tests of linger timing).
+    if (s.pinDummy && st.pin) { try { d.pawn.K2_SetActorLocation(st.pin, false, puerts.$ref(new UE.HitResult()), true); } catch (e) { } }   // keep the Lv30 hit-counter burst from killing the dummy
     if (!st.steps.has("flowers") && rel >= s.flowersAt) {
         st.steps.add("flowers");
         try {
@@ -267,7 +269,8 @@ function selftest(pawn) {
                 fl.sort((a, b) => Math.hypot(a.X - c.X, a.Y - c.Y) - Math.hypot(b.X - c.X, b.Y - c.Y));
                 const gz = fl[0].Z;                       // the floor under the centre flower
                 let hh = 90; try { hh = d.pawn.CapsuleComponent.GetScaledCapsuleHalfHeight(); } catch (e) { }
-                d.pawn.K2_SetActorLocation(new UE.Vector(c.X, c.Y, gz + hh), false, puerts.$ref(new UE.HitResult()), true);
+                st.pin = new UE.Vector(c.X, c.Y, gz + hh);
+                d.pawn.K2_SetActorLocation(st.pin, false, puerts.$ref(new UE.HitResult()), true);
                 log(`selftest: dummy set down from z ${r1(c.Z)} to ${r1(gz + hh)} (centre flower floor ${r1(gz)}, half height ${r1(hh)})`);
             }
         } catch (e) { log("selftest: setting the dummy down failed: " + e); }

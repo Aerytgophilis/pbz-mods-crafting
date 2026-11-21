@@ -6,7 +6,7 @@
   "flowerLifetime": 25,
   "lingerEnabled": true,
   "lingerSafetyCap": 30,
-  "ultraEnabled": true,
+  "ultraEnabled": false,
   "tickDamageScale": 0,      // 探针：自动爆炸不掉血，好让木桩活着测寿命
   "debugLog": true,
 }

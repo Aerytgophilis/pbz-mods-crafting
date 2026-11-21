@@ -27,6 +27,7 @@ const P_BD_EXPLODE = [
     "/PBZCombatAsset/ActorData/Players/Hun/BulletData/LongBlade/GuiTouBlade/Flower/BD_Hun_GuiTouBlade_Flower_Explode.BD_Hun_GuiTouBlade_Flower_Explode",
     "/PBZCombatAsset/ActorData/Players/Hun/BulletData/LongBlade/GuiTouBlade/Flower/BD_Hun_GuiTouBlade_Flower_Big_Explode.BD_Hun_GuiTouBlade_Flower_Big_Explode",
 ];
+const P_CALC_CANT_BREAK = "/PBZCombatAsset/Config/DamageCalculator/DamageCalculator_CantBreakTarget.DamageCalculator_CantBreakTarget";
 const P_COMBAT_UTILS = "/PBZCombatAsset/Prototypes/BPL_PBZCombatUtils.BPL_PBZCombatUtils_C";
 const TAG = {
     canManual: "CharacterState.WeaponUpgrade.GuiTouBlade.CanManualExplode",
@@ -57,6 +58,9 @@ const K = {
     // Automatic explosions drop the burn and scale the hit by tickDamageScale / (1 - burnShare).
     tickBurn: false,          // keep the after-hit burn GE on automatic explosions
     burnShare: 0.625,
+    // Shachi at 0 is a killing blow for normal enemies. The vanilla flower debuff (Debuff_Tick) uses this calculator
+    // and stops at 0.1; automatic explosions use it too, so they wear Shachi down but never finish an enemy.
+    tickCantBreak: true,
     burnRestoreDelay: 0.15,   // when tickBurn is false: the burn GE stays blank this long after an automatic explosion
     remainGuard: 0.3,         // no auto explosion this close to expiry (the expiry explosion follows)
     maxTickSounds: 4,         // per auto explosion batch
@@ -256,18 +260,36 @@ function alive(a) {
         return UE.PBZBlueprintFunctionLibrary.GetAttributeFromCharacter(a, healthAttr) > 0;
     } catch (e) { return true; }
 }
-// Enemies (NPC characters, alive) inside this flower, from the flower's own overlap list.
-function enemiesIn(f, pawn) {
+// Enemies (NPC characters, alive) inside a flower, by distance: the flower's own "Overlapping Actors" list loses an
+// enemy that is still standing in it (seen 2026-11-21 after the enemy's Shachi broke), so it is not used.
+// `npcs` is gathered once per poll (alive NPCs near the player).
+function nearbyNpcs(pawn) {
     const out = [];
-    let arr;
-    try { arr = f["Overlapping Actors"]; } catch (e) { logOnce("ov-err", "reading Overlapping Actors failed: " + e); return out; }
-    if (!arr) return out;
-    for (let i = 0; i < arr.Num(); i++) {
-        const a = arr.Get(i);
-        if (!valid(a) || a === pawn) continue;
-        try { if (!a.IsA(UE.PBZCharacter_NPC.StaticClass())) continue; } catch (e) { continue; }
-        if (alive(a)) out.push(a);
-    }
+    try {
+        const ref = puerts.$ref(UE.NewArray(UE.Actor));
+        UE.GameplayStatics.GetAllActorsOfClass(gi, UE.PBZCharacter_NPC.StaticClass(), ref);
+        const arr = puerts.$unref(ref), here = pawn.K2_GetActorLocation();
+        for (let i = 0; i < arr.Num(); i++) {
+            const a = arr.Get(i);
+            if (!valid(a) || a === pawn) continue;
+            const p = a.K2_GetActorLocation();
+            if (Math.hypot(p.X - here.X, p.Y - here.Y) > 5000 || !alive(a)) continue;
+            let r = 40; try { r = a.CapsuleComponent.GetScaledCapsuleRadius(); } catch (e) { }
+            out.push({ a, p, r });
+        }
+    } catch (e) { logOnce("npc-err", "listing NPCs failed: " + e); }
+    return out;
+}
+function flowerRadius(f, rec) {
+    if (rec.radius) return rec.radius;
+    let r = rec.big ? 280 : 100;
+    try { r = f.Capsule.GetScaledCapsuleRadius(); } catch (e) { logOnce("cap-r", `flower Capsule radius not readable (${e}); using ${r}`); }
+    rec.radius = r;
+    return r;
+}
+function enemiesIn(f, rec, npcs) {
+    const fp = f.K2_GetActorLocation(), R = flowerRadius(f, rec), out = [];
+    for (const n of npcs) if (Math.hypot(n.p.X - fp.X, n.p.Y - fp.Y) < R + n.r && Math.abs(n.p.Z - fp.Z) < 250) out.push(n.a);
     return out;
 }
 
@@ -309,7 +331,16 @@ function attackDataStr(m) {
 function applyTickDamage(b, mods, why) {
     const ms = attackModules(b);
     if (!ms.length) { logOnce("no-mod", `[${why}] explosion bullet has no BulletAttackModule: tick damage stays at 100%`); return; }
+    let calc = null;
+    if (K.tickCantBreak) {
+        try { calc = UE.Object.Load(P_CALC_CANT_BREAK); } catch (e) { }
+        if (!valid(calc)) { calc = null; logOnce("calc-miss", "DamageCalculator_CantBreakTarget not found: automatic explosions can break (finish) enemies"); }
+    }
     for (const m of ms) {
+        if (calc) {
+            try { const was = m.DamageCalculator; m.DamageCalculator = calc; logOnce("calc-ok", `[${why}] damage calculator ${was ? pathOf(was).split(".").pop() : "(none)"} -> ${pathOf(m.DamageCalculator).split(".").pop()}`); }
+            catch (e) { logOnce("calc-err", "setting the damage calculator failed: " + e); }
+        }
         const before = cfg.debugLog || !once.has("dmg-first") ? attackDataStr(m) : "";
         try {
             m.AddModifier(makeTag(TAG.dmgPhys), MOD_MULTIPLY, mods.dmg);
@@ -467,6 +498,8 @@ function tickFlowers(pawn) {
     const cap = cfg.lingerSafetyCap > 0 ? cfg.lingerSafetyCap : Infinity;
     const ultraOn = cfg.ultraEnabled && w.evolution;
     const seen = new Set(), due = [], ultraEnemies = new Map();
+    let npcCache = null;
+    const npcs = () => npcCache || (npcCache = nearbyNpcs(pawn));
     let anyStrict = false;
 
     for (const f of playerFlowers(pawn)) {
@@ -487,7 +520,7 @@ function tickFlowers(pawn) {
             shared.recs.set(key, rec);
             if (k > 1.001 && scaleFlower(f, k)) rec.scaled = true;
             if (k > 1.001 && cfg.areaSpreadRings && !rec.big && !early) { pendingRing.push(rec); pendingAt = t; }
-            dbg(`flower seen: ${rec.big ? "big" : "small"}, life ${r2(life)} s${early ? " (early)" : ""}, extra life ${rec.lifeBudget} s, age ${r2(tm.elapsed)}`);
+            dbg(`flower seen: ${rec.big ? "big" : "small"}, life ${r2(life)} s${early ? " (early)" : ""}, extra life ${r2(rec.lifeBudget)} s, age ${r2(tm.elapsed)}, radius ${r2(flowerRadius(f, rec))}`);
         }
         rec.lastElapsed = tm.elapsed;
         const age = t - rec.born;
@@ -500,7 +533,7 @@ function tickFlowers(pawn) {
                 try { f["Expire Explode"](); } catch (e) { logOnce("expire-err", "Expire Explode failed: " + e); }
                 shared.recs.delete(key); seen.delete(key); continue;
             }
-            const inside = lMax > 0 || ultraOn ? enemiesIn(f, pawn) : [];
+            const inside = lMax > 0 || ultraOn ? enemiesIn(f, rec, npcs()) : [];
             if (rec.pausedBy && tm.paused) rec[rec.pausedBy] += dt;               // consume the budget of the last poll
             let want = null;
             if (rec.lifeUsed < rec.lifeBudget) want = "lifeUsed";
